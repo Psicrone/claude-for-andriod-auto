@@ -2,9 +2,9 @@
 <resources>
     <string name="app_name">Claude Auto</string>
     <string name="bridge_url">Bridge URL</string>
-    <string name="bridge_url_hint">http://100.64.0.10:8787</string>
-    <string name="bridge_token">Bridge token</string>
-    <string name="save_and_test">Save and test</string>
+    <string name="bridge_url_hint">https://100.64.0.10:8787</string>
+    <string name="pairing_code">Pairing code from your computer</string>
+    <string name="pair">Pair with computer</string>
     <string name="pick_session">Choose session</string>
     <string name="speak_replies">Read replies aloud</string>
     <string name="talk">Talk</string>

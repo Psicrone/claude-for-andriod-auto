@@ -3,6 +3,7 @@ package com.claudeauto.ui
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.view.inputmethod.EditorInfo
@@ -17,11 +18,14 @@ import com.claudeauto.ClaudeAutoApp
 import com.claudeauto.Conversation
 import com.claudeauto.StoreState
 import com.claudeauto.bridge.BridgeClient
+import com.claudeauto.bridge.PinnedTls
 import com.claudeauto.bridge.TurnState
 import com.claudeauto.databinding.ActivityMainBinding
 import com.claudeauto.voice.Listener
 import com.claudeauto.voice.Speaker
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 /**
  * Phone screen: connect to the bridge, pick a Claude Code session and talk to it.
@@ -46,7 +50,6 @@ class MainActivity : AppCompatActivity() {
 
         conversationKey = intent.getStringExtra(EXTRA_CONVERSATION) ?: app.settings.currentConversation
         binding.bridgeUrl.setText(app.settings.bridgeUrl)
-        binding.token.setText(app.settings.token)
         binding.speakReplies.isChecked = app.settings.speakReplies
         binding.settingsPanel.visibility = if (app.settings.isConfigured) View.GONE else View.VISIBLE
         binding.title.setOnLongClickListener {
@@ -54,7 +57,7 @@ class MainActivity : AppCompatActivity() {
             true
         }
 
-        binding.save.setOnClickListener { saveAndTest() }
+        binding.pair.setOnClickListener { pair() }
         binding.pickSession.setOnClickListener { pickConversation() }
         binding.speakReplies.setOnCheckedChangeListener { _, checked ->
             app.settings.speakReplies = checked
@@ -144,20 +147,55 @@ class MainActivity : AppCompatActivity() {
         app.notifier.cancel(key)
     }
 
-    private fun saveAndTest() {
-        app.settings.bridgeUrl = binding.bridgeUrl.text.toString()
-        app.settings.token = binding.token.text.toString()
-        binding.status.text = "Connecting…"
+    /**
+     * Pairs this phone with the bridge: read the bridge's certificate, have the user confirm
+     * it matches what the computer printed, pin it, then trade the one-time code for a
+     * device token that only this phone holds.
+     */
+    private fun pair() {
+        val url = binding.bridgeUrl.text.toString().trim()
+        val code = binding.pairingCode.text.toString().trim()
+        if (code.isEmpty()) {
+            binding.status.text = "Enter the pairing code your computer shows."
+            return
+        }
+        binding.status.text = "Checking the bridge's certificate…"
         lifecycleScope.launch {
-            val version = runCatching { BridgeClient(app.settings.bridgeUrl, app.settings.token).health() }
+            val probe = runCatching { BridgeClient.probe(url) }.getOrElse {
+                binding.status.text = "Can't reach the bridge: ${it.message}"
+                return@launch
+            }
+            val pin = if (probe.systemTrusted) null else probe.fingerprint
+            if (pin != null && !confirmCertificate(PinnedTls.short(pin))) {
+                binding.status.text = "Pairing cancelled. The certificate didn't match, so nothing was sent."
+                return@launch
+            }
+            val token = runCatching { BridgeClient.pair(url, pin, code, Build.MODEL ?: "Phone") }.getOrElse {
+                binding.status.text = "Pairing failed: ${it.message}"
+                return@launch
+            }
+            app.settings.bridgeUrl = url
+            app.settings.certFingerprint = pin.orEmpty()
+            app.settings.token = token
+            binding.pairingCode.text?.clear()
             val loaded = app.store.refresh()
-            binding.status.text = when {
-                version.isFailure -> "Can't reach the bridge: ${version.exceptionOrNull()?.message}"
-                loaded.isFailure -> "Bridge found, but: ${loaded.exceptionOrNull()?.message}"
-                else -> "Connected to bridge ${version.getOrNull()}"
+            binding.status.text = if (loaded.isSuccess) {
+                "Paired" + (pin?.let { ". Certificate ${PinnedTls.short(it)} pinned." } ?: ".")
+            } else {
+                "Paired, but: ${loaded.exceptionOrNull()?.message}"
             }
             if (loaded.isSuccess) binding.settingsPanel.visibility = View.GONE
         }
+    }
+
+    private suspend fun confirmCertificate(short: String): Boolean = suspendCancellableCoroutine { cont ->
+        AlertDialog.Builder(this)
+            .setTitle("Check the certificate")
+            .setMessage("Your computer's bridge printed \"Certificate: …\". This bridge's certificate is $short. Do they match?")
+            .setPositiveButton("They match") { _, _ -> if (cont.isActive) cont.resume(true) }
+            .setNegativeButton("No") { _, _ -> if (cont.isActive) cont.resume(false) }
+            .setOnCancelListener { if (cont.isActive) cont.resume(false) }
+            .show()
     }
 
     private fun pickConversation() {

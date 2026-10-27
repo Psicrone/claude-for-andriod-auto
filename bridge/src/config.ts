@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 
 export type PermissionPolicy = "ask" | "acceptEdits" | "readonly";
 
@@ -9,7 +10,14 @@ export interface Project {
 }
 
 export interface Config {
-  token: string;
+  /** Where the TLS certificate and paired devices live. */
+  dataDir: string;
+  /**
+   * "self-signed" (default): the bridge serves HTTPS itself and the phone pins the certificate.
+   * "off": plain HTTP, only allowed on a loopback address behind something that terminates TLS
+   * (Tailscale Serve, a Cloudflare tunnel).
+   */
+  tls: "self-signed" | "off";
   host: string;
   port: number;
   projects: Project[];
@@ -37,10 +45,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     process.loadEnvFile?.(envFile);
   }
 
-  const token = env.BRIDGE_TOKEN ?? "";
-  if (token.length < 16 || token === "change-me") {
+  const host = env.BRIDGE_HOST ?? "127.0.0.1";
+  const tls = (env.BRIDGE_TLS ?? "self-signed") as Config["tls"];
+  if (tls !== "self-signed" && tls !== "off") {
+    throw new Error(`BRIDGE_TLS must be self-signed or off (got "${tls}").`);
+  }
+  if (tls === "off" && !isLoopback(host)) {
     throw new Error(
-      "BRIDGE_TOKEN must be set to a random secret of at least 16 characters (see .env.example).",
+      "BRIDGE_TLS=off is only allowed when BRIDGE_HOST is 127.0.0.1 or ::1, behind a proxy that adds HTTPS.",
     );
   }
 
@@ -50,11 +62,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   }
 
   return {
-    token,
-    host: env.BRIDGE_HOST ?? "127.0.0.1",
+    dataDir: env.BRIDGE_DATA_DIR || join(homedir(), ".claude-auto-bridge"),
+    tls,
+    host,
     port: Number(env.BRIDGE_PORT ?? 8787),
     projects: parseProjects(env.BRIDGE_PROJECTS),
     permissions,
     model: env.BRIDGE_MODEL || undefined,
   };
+}
+
+export function isLoopback(host: string): boolean {
+  return host === "localhost" || host === "::1" || host.startsWith("127.");
 }

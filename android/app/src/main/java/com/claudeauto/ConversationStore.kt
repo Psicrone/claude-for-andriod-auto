@@ -78,10 +78,10 @@ class ConversationStore(private val settings: Settings, private val scope: Corou
     }
 
     private fun client(): BridgeClient {
-        check(settings.isConfigured) { "Set the bridge URL and token in the Claude Auto phone app first." }
-        val key = settings.bridgeUrl + "\u0000" + settings.token
+        check(settings.isConfigured) { "Pair the Claude Auto phone app with your computer first." }
+        val key = listOf(settings.bridgeUrl, settings.token, settings.certFingerprint).joinToString("\u0000")
         if (client == null || key != clientKey) {
-            client = BridgeClient(settings.bridgeUrl, settings.token)
+            client = BridgeClient(settings.bridgeUrl, settings.token, settings.certFingerprint.ifBlank { null })
             clientKey = key
         }
         return client!!

@@ -42,21 +42,20 @@
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="@string/bridge_token"
-            app:endIconMode="password_toggle">
+            android:hint="@string/pairing_code">
 
             <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/token"
+                android:id="@+id/pairingCode"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:inputType="textPassword" />
+                android:inputType="textCapCharacters|textNoSuggestions" />
         </com.google.android.material.textfield.TextInputLayout>
 
         <Button
-            android:id="@+id/save"
+            android:id="@+id/pair"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@string/save_and_test" />
+            android:text="@string/pair" />
     </LinearLayout>
 
     <LinearLayout

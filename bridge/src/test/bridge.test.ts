@@ -1,16 +1,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { request as httpsRequest, createServer as createHttpsServer } from "node:https";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { TLSSocket } from "node:tls";
 import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { createBridge } from "../server.js";
+import { createHandler } from "../server.js";
 import type { Config } from "../config.js";
 import { parseProjects } from "../config.js";
+import { DeviceStore, FailureLimiter, loadOrCreateCertificate, Pairing } from "../security.js";
 import { toSpeech } from "../speech.js";
 import type { QueryFn } from "../turns.js";
 
-const TOKEN = "test-token-0123456789";
+const dataDir = mkdtempSync(join(tmpdir(), "claude-auto-test-"));
 const config: Config = {
-  token: TOKEN,
+  dataDir,
+  tls: "self-signed",
   host: "127.0.0.1",
   port: 0,
   projects: [{ name: "work", path: "/tmp" }],
@@ -41,29 +48,108 @@ const fakeQuery: QueryFn = ({ prompt, options }: { prompt: string; options?: Opt
     } as unknown as SDKMessage;
   })();
 
-async function startBridge() {
-  const server = createBridge(config, {
-    queryFn: fakeQuery,
-    listSessionsFn: async () => [{ id: "session-1", title: "Fix login", project: "work", lastModified: 1 }],
-  });
+/**
+ * Starts an HTTPS bridge with one paired device. Requests are made the way the phone makes
+ * them: no certificate authority, only the pinned SHA-256 fingerprint is trusted.
+ */
+async function startBridge(options: { pairingCode?: boolean; limiter?: FailureLimiter } = {}) {
+  const tls = await loadOrCreateCertificate(dataDir);
+  const devices = new DeviceStore(mkdtempSync(join(tmpdir(), "claude-auto-devices-")));
+  const { token } = devices.add("Test phone");
+  const pairing = new Pairing();
+  const code = options.pairingCode ? pairing.open() : undefined;
+  const server = createHttpsServer(
+    { key: tls.key, cert: tls.cert },
+    createHandler(config, {
+      devices,
+      pairing,
+      limiter: options.limiter,
+      queryFn: fakeQuery,
+      listSessionsFn: async () => [{ id: "session-1", title: "Fix login", project: "work", lastModified: 1 }],
+    }),
+  );
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
-  const call = async (method: string, path: string, body?: unknown, token = TOKEN) => {
-    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
-      method,
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
+
+  const call = (method: string, path: string, body?: unknown, bearer: string | null = token, pin = tls.fingerprint) =>
+    new Promise<{ status: number; json: any }>((resolve, reject) => {
+      const req = httpsRequest(
+        {
+          host: "127.0.0.1",
+          port,
+          path,
+          method,
+          headers: {
+            ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+            "content-type": "application/json",
+          },
+          // Same trust rule as the app: accept the certificate only if its fingerprint matches.
+          rejectUnauthorized: false,
+          agent: false,
+        },
+        (res) => {
+          const peer = (res.socket as TLSSocket).getPeerCertificate();
+          if (peer.fingerprint256 !== pin) {
+            res.destroy();
+            return reject(new Error("certificate fingerprint mismatch"));
+          }
+          let text = "";
+          res.on("data", (chunk) => (text += chunk));
+          res.on("end", () => resolve({ status: res.statusCode ?? 0, json: JSON.parse(text || "{}") }));
+        },
+      );
+      req.on("error", reject);
+      if (body !== undefined) req.write(JSON.stringify(body));
+      req.end();
     });
-    return { status: res.status, json: (await res.json()) as any };
-  };
-  return { server, call };
+  return { server, call, code, devices };
 }
 
-test("rejects requests without the token", async () => {
+test("rejects devices that aren't paired", async () => {
   const { server, call } = await startBridge();
   try {
-    assert.equal((await call("GET", "/health", undefined, "nope")).status, 200);
-    assert.equal((await call("GET", "/sessions", undefined, "wrong-token")).status, 401);
+    assert.equal((await call("GET", "/health", undefined, null)).status, 200);
+    assert.equal((await call("GET", "/sessions", undefined, null)).status, 401);
+    assert.equal((await call("GET", "/sessions", undefined, "not-a-device-token")).status, 401);
+  } finally {
+    server.close();
+  }
+});
+
+test("a phone pinning a different certificate refuses to talk", async () => {
+  const { server, call } = await startBridge();
+  try {
+    await assert.rejects(call("GET", "/health", undefined, null, "00:11:22"), /fingerprint mismatch/);
+  } finally {
+    server.close();
+  }
+});
+
+test("pairing with the one-time code issues a device token", async () => {
+  const { server, call, code, devices } = await startBridge({ pairingCode: true });
+  try {
+    assert.equal((await call("POST", "/pair", { code: "WRONG-CODE" }, null)).status, 401);
+    const paired = await call("POST", "/pair", { code: code!.toLowerCase(), deviceName: "Pixel" }, null);
+    assert.equal(paired.status, 200);
+    assert.equal((await call("GET", "/projects", undefined, paired.json.token)).status, 200);
+    assert.equal(devices.list().length, 2);
+
+    // The code works once.
+    assert.equal((await call("POST", "/pair", { code }, null)).status, 403);
+
+    // Revoking the device locks it out.
+    devices.revoke(paired.json.deviceId);
+    assert.equal((await call("GET", "/projects", undefined, paired.json.token)).status, 401);
+  } finally {
+    server.close();
+  }
+});
+
+test("repeated bad tokens lock the address out", async () => {
+  const { server, call } = await startBridge({ limiter: new FailureLimiter(3) });
+  try {
+    for (let i = 0; i < 3; i++) await call("GET", "/sessions", undefined, "guess");
+    assert.equal((await call("GET", "/sessions")).status, 429);
   } finally {
     server.close();
   }
