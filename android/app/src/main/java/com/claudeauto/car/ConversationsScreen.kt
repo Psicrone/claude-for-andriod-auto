@@ -80,6 +80,13 @@ class ConversationsScreen(carContext: CarContext) : Screen(carContext) {
             .setSingleList(items.build())
             .setActionStrip(
                 ActionStrip.Builder()
+                    .addAction(
+                        Action.Builder()
+                            .setTitle("New")
+                            .setIcon(CarIcon.Builder(IconCompat.createWithResource(carContext, R.drawable.ic_mic)).build())
+                            .setOnClickListener { talkInNewConversation() }
+                            .build(),
+                    )
                     .addAction(Action.Builder().setTitle("Refresh").setOnClickListener { refresh() }.build())
                     .build(),
             )
@@ -136,6 +143,7 @@ class ConversationsScreen(carContext: CarContext) : Screen(carContext) {
                 }
 
                 override fun onTextReply(replyText: String) {
+                    app.settings.currentConversation = conversation.key
                     app.store.markRead(conversation.key)
                     app.notifier.cancel(conversation.key)
                     lifecycleScope.launch { app.store.send(conversation.key, replyText) }
@@ -144,6 +152,17 @@ class ConversationsScreen(carContext: CarContext) : Screen(carContext) {
         )
             .setIcon(claudeIcon)
             .build()
+    }
+
+    /** The mic button: dictate a request that starts a new session in the default project. */
+    private fun talkInNewConversation() {
+        val fresh = app.store.state.value.conversations.firstOrNull { it.isNew }
+        if (fresh == null) {
+            CarToast.makeText(carContext, "Can't start a new conversation until Claude Auto connects.", CarToast.LENGTH_LONG).show()
+            refresh()
+            return
+        }
+        screenManager.push(ListeningScreen(carContext, fresh.key, fresh.title))
     }
 
     private fun refresh() {
