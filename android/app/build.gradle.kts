@@ -11,14 +11,30 @@ android {
         applicationId = "com.claudeauto"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // Release builds get these from the tag and run number (see .github/workflows/release.yml).
+        versionCode = System.getenv("CLAUDE_AUTO_VERSION_CODE")?.toIntOrNull() ?: 3
+        versionName = System.getenv("CLAUDE_AUTO_VERSION") ?: "0.3.0"
+    }
+
+    // Release signing comes from CI secrets. Without them a release build is signed with the
+    // debug key, which installs fine but can't update an APK signed with the real key.
+    val keystore = System.getenv("CLAUDE_AUTO_KEYSTORE")?.let(::file)?.takeIf { it.exists() }
+    signingConfigs {
+        if (keystore != null) {
+            create("release") {
+                storeFile = keystore
+                storePassword = System.getenv("CLAUDE_AUTO_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("CLAUDE_AUTO_KEY_ALIAS")
+                keyPassword = System.getenv("CLAUDE_AUTO_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 
@@ -52,6 +68,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.okhttp)
+    implementation(libs.androidx.recyclerview)
+    implementation(libs.androidx.transition)
+    implementation(libs.play.services.code.scanner)
 
     testImplementation(libs.junit)
 }

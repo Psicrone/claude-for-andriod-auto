@@ -1,7 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Brand -->
     <color name="claude_orange">#D97757</color>
     <color name="claude_dark">#1F1E1D</color>
     <color name="claude_cream">#F5F4EE</color>
     <color name="ic_launcher_background">#D97757</color>
+
+    <!-- Light scheme (values-night has the dark one) -->
+    <color name="primary">#B5532F</color>
+    <color name="on_primary">#FFFFFF</color>
+    <color name="primary_container">#FFDBCF</color>
+    <color name="on_primary_container">#3A0B00</color>
+    <color name="secondary">#77574C</color>
+    <color name="on_secondary">#FFFFFF</color>
+    <color name="secondary_container">#F6E3DA</color>
+    <color name="on_secondary_container">#2C160D</color>
+    <color name="tertiary">#5C6236</color>
+    <color name="on_tertiary">#FFFFFF</color>
+    <color name="tertiary_container">#E1E7B0</color>
+    <color name="on_tertiary_container">#1A1E00</color>
+    <color name="background">#FAF9F5</color>
+    <color name="on_background">#1F1E1D</color>
+    <color name="surface">#FAF9F5</color>
+    <color name="on_surface">#1F1E1D</color>
+    <color name="surface_variant">#EDEAE0</color>
+    <color name="on_surface_variant">#5E5D59</color>
+    <color name="surface_container_lowest">#FFFFFF</color>
+    <color name="surface_container_low">#F5F3EC</color>
+    <color name="surface_container">#F0EEE6</color>
+    <color name="surface_container_high">#EAE7DD</color>
+    <color name="surface_container_highest">#E4E1D6</color>
+    <color name="outline">#87867F</color>
+    <color name="outline_variant">#D6D3C8</color>
+    <color name="success">#3B7A3B</color>
 </resources>

@@ -1,26 +1,105 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Claude Auto</string>
-    <string name="bridge_url">Bridge URL</string>
-    <string name="bridge_url_hint">https://100.64.0.10:8787</string>
-    <string name="pairing_code">Pairing code the bridge shows</string>
-    <string name="pair">Pair</string>
+
+    <!-- Setup: welcome -->
+    <string name="welcome_title">Claude, on the road</string>
+    <string name="welcome_body">Talk to Claude Code from your car. Dictate a task on the way to work and hear what it did.</string>
+    <string name="welcome_feature_talk">Dictate tasks hands-free</string>
+    <string name="welcome_feature_car">Replies read aloud in Android Auto</string>
+    <string name="welcome_feature_approve">Say yes or no before anything risky runs</string>
+    <string name="get_started">Get started</string>
+
+    <!-- Setup: mode -->
+    <string name="mode_title">Where should Claude run?</string>
+    <string name="mode_body">You can change this later.</string>
     <string name="mode_computer">My computer</string>
+    <string name="mode_computer_long">My computer or Raspberry Pi</string>
+    <string name="mode_computer_body">Claude Code with your repos and your Claude login. Install a small bridge, then scan a QR code.</string>
     <string name="mode_phone">This phone</string>
-    <string name="help_computer">Run the bridge on your computer with \"npm run pair\" and enter the address and code it prints.</string>
-    <string name="help_phone">Run the bridge in Termux on this phone (see \"Run it on this phone\" in the README). Start it with \"claude-auto-bridge pair\", then enter the code it prints.</string>
+    <string name="mode_phone_body">Runs Claude Code in Termux on this phone. No computer needed, but keep it on a charger.</string>
     <string name="mode_cloud">Cloud</string>
+    <string name="mode_cloud_body">Anthropic-hosted sandboxes with your GitHub repos. Needs an API key, billed per use.</string>
+    <string name="recommended">Recommended</string>
+
+    <!-- Setup: computer -->
+    <string name="computer_title">Install the bridge</string>
+    <string name="computer_body">Run this on the computer that has your code. It installs the bridge, starts it automatically and shows a QR code.</string>
+    <string name="os_windows">Windows</string>
+    <string name="os_mac_linux">Mac / Linux</string>
+    <string name="os_pi">Raspberry Pi</string>
+    <string name="where_windows">In PowerShell:</string>
+    <string name="where_mac_linux">In Terminal:</string>
+    <string name="where_pi">On the Pi (64-bit Raspberry Pi OS), in a terminal or over SSH:</string>
+    <string name="copy">Copy</string>
+    <string name="share">Send to computer</string>
+    <string name="copied">Copied</string>
+    <string name="scan_qr">Scan the QR code</string>
+    <string name="scan_hint">Already installed? Run claude-auto-bridge pair (or claude-auto pair on a Pi) to show the code again.</string>
+    <string name="enter_code_instead">Enter the code by hand</string>
+    <string name="bridge_url">Bridge address</string>
+    <string name="bridge_url_hint">https://192.168.1.20:8787</string>
+    <string name="pairing_code">Pairing code</string>
+    <string name="pair">Pair</string>
+
+    <!-- Setup: phone -->
+    <string name="phone_title">Run Claude on this phone</string>
+    <string name="phone_body">Claude Code runs in Termux, in a small Linux environment. Setup downloads about 1 GB, so use Wi-Fi.</string>
+    <string name="phone_step1_title">Install Termux</string>
+    <string name="phone_step1_body">From F-Droid or GitHub. The Play Store version is out of date.</string>
+    <string name="get_termux">Get Termux</string>
+    <string name="termux_installed">Termux is installed</string>
+    <string name="phone_step2_title">Run the installer</string>
+    <string name="phone_step2_body">This copies one command and opens Termux. Long-press in Termux, tap Paste, then press Enter.</string>
+    <string name="copy_open_termux">Copy and open Termux</string>
+    <string name="phone_step3_title">Sign in, then come back</string>
+    <string name="phone_step3_body">When it asks, sign in to your Claude account and type /exit. Claude Auto then opens by itself and finishes pairing.</string>
+    <string name="phone_battery">Also set Termux\'s battery use to Unrestricted, so Android doesn\'t stop it.</string>
+    <string name="battery_settings">Battery settings</string>
+
+    <!-- Setup: cloud -->
+    <string name="cloud_title">Connect to the cloud</string>
+    <string name="cloud_body">Each conversation gets its own sandbox with your repo, where Claude can edit, test and push to a new branch.</string>
     <string name="api_key">Anthropic API key</string>
-    <string name="github_token">GitHub token (repo contents read/write)</string>
+    <string name="api_key_help">Billed per use. Set a spend limit in the Console.</string>
+    <string name="get_api_key">Get an API key</string>
+    <string name="github_token">GitHub token</string>
+    <string name="github_token_help">Fine-grained, with Contents: read and write on the repos below.</string>
+    <string name="create_github_token">Create a token</string>
     <string name="repos">Repos, one per line (owner/repo)</string>
-    <string name="save_cloud">Save and connect</string>
-    <string name="pick_session">Choose session</string>
+    <string name="save_cloud">Connect</string>
+
+    <!-- Setup: done -->
+    <string name="done_title">You\'re connected</string>
+    <string name="done_permissions">A few things so it works in the car:</string>
+    <string name="perm_mic_title">Microphone</string>
+    <string name="perm_mic_body">So you can talk to Claude.</string>
+    <string name="perm_notify_title">Notifications</string>
+    <string name="perm_notify_body">Replies show up and are read out in the car.</string>
+    <string name="perm_auto_title">Android Auto</string>
+    <string name="perm_auto_body">Apps from outside the Play Store need Unknown sources turned on in Android Auto.</string>
+    <string name="allow">Allow</string>
+    <string name="allowed">Allowed</string>
+    <string name="show_me">Show me</string>
+    <string name="auto_steps_title">Show Claude Auto in your car</string>
+    <string name="auto_steps">1. Open Android Auto settings (button below, or Settings › Connected devices › Android Auto).\n\n2. Scroll down and tap Version ten times, then allow developer settings.\n\n3. Tap ⋮ › Developer settings and turn on Unknown sources.\n\n4. Back in Android Auto settings › Customize launcher, make sure Claude Auto is ticked.</string>
+    <string name="open_android_auto">Open Android Auto</string>
+    <string name="start_talking">Start talking</string>
+
+    <!-- Main screen -->
+    <string name="pick_session">Choose a conversation</string>
     <string name="speak_replies">Read replies aloud</string>
+    <string name="connection_settings">Connection</string>
+    <string name="refresh">Refresh</string>
     <string name="talk">Talk</string>
     <string name="send">Send</string>
-    <string name="message_hint">Or type a message</string>
-    <string name="approve">Approve</string>
-    <string name="deny">Deny</string>
+    <string name="message_hint">Message Claude</string>
+    <string name="empty_title">What should Claude work on?</string>
+    <string name="empty_body">Tap the mic and say it, or type below. In the car, open Claude Auto from the Android Auto launcher.</string>
+    <string name="listening">Listening…</string>
+    <string name="approval_title">Claude wants to</string>
+    <string name="approve">Allow</string>
+    <string name="deny">Don\'t allow</string>
     <string name="stop">Stop</string>
     <string name="no_session">New conversation</string>
     <string name="channel_replies">Claude replies</string>
@@ -28,4 +107,5 @@
     <string name="you">You</string>
     <string name="reply">Reply</string>
     <string name="mark_read">Mark as read</string>
+    <string name="back">Back</string>
 </resources>

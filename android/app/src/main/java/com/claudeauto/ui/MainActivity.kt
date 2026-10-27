@@ -1,36 +1,41 @@
 package com.claudeauto.ui
 
 import android.Manifest
+import android.animation.ObjectAnimator
+import android.animation.PropertyValuesHolder
+import android.animation.ValueAnimator
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
+import android.content.res.ColorStateList
 import android.os.Bundle
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.transition.TransitionManager
 import com.claudeauto.ClaudeAutoApp
 import com.claudeauto.Conversation
+import com.claudeauto.R
 import com.claudeauto.Settings
 import com.claudeauto.StoreState
-import com.claudeauto.bridge.BridgeClient
-import com.claudeauto.bridge.PinnedTls
 import com.claudeauto.backend.TurnState
 import com.claudeauto.databinding.ActivityMainBinding
+import com.claudeauto.databinding.ItemConversationBinding
+import com.claudeauto.databinding.SheetConversationsBinding
 import com.claudeauto.voice.Listener
 import com.claudeauto.voice.Speaker
+import com.google.android.material.bottomsheet.BottomSheetDialog
+import com.google.android.material.color.MaterialColors
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlin.coroutines.resume
 
 /**
- * Phone screen: connect to a bridge or the cloud, pick a Claude Code session and talk to it.
- * The same conversations show up in Android Auto.
+ * Phone screen: pick a Claude Code conversation and talk to it. The same conversations show up
+ * in Android Auto. Setup and pairing live in [SetupActivity].
  */
 class MainActivity : AppCompatActivity() {
 
@@ -38,60 +43,52 @@ class MainActivity : AppCompatActivity() {
     private val app get() = application as ClaudeAutoApp
     private lateinit var speaker: Speaker
     private lateinit var listener: Listener
+    private val adapter = MessageAdapter()
     private var conversationKey: String? = null
-    private var shownMode = Settings.MODE_BRIDGE
+    private var pulse: ValueAnimator? = null
 
     private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!app.settings.isConfigured) {
+            startActivity(Intent(this, SetupActivity::class.java))
+            finish()
+            return
+        }
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         speaker = Speaker(this)
         listener = Listener(this)
 
         conversationKey = intent.getStringExtra(EXTRA_CONVERSATION) ?: app.settings.currentConversation
-        binding.speakReplies.isChecked = app.settings.speakReplies
-        binding.settingsPanel.visibility = if (app.settings.isConfigured) View.GONE else View.VISIBLE
-        binding.title.setOnLongClickListener {
-            binding.settingsPanel.visibility = View.VISIBLE
+
+        binding.messages.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
+        binding.messages.adapter = adapter
+
+        binding.conversationButton.setOnClickListener { pickConversation() }
+        binding.toolbar.menu.findItem(R.id.speak).isChecked = app.settings.speakReplies
+        binding.toolbar.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                R.id.speak -> {
+                    item.isChecked = !item.isChecked
+                    app.settings.speakReplies = item.isChecked
+                    if (!item.isChecked) speaker.stop()
+                }
+                R.id.refresh -> lifecycleScope.launch { app.store.refresh() }
+                R.id.settings -> startActivity(Intent(this, SetupActivity::class.java).putExtra(SetupActivity.EXTRA_CHANGE, true))
+            }
             true
         }
 
-        binding.pair.setOnClickListener { pair() }
-        binding.saveCloud.setOnClickListener { saveCloud() }
-        binding.apiKey.setText(app.settings.apiKey)
-        binding.githubToken.setText(app.settings.githubToken)
-        binding.repos.setText(app.settings.repos.joinToString("\n"))
-        binding.modeGroup.check(
-            when (app.settings.mode) {
-                Settings.MODE_CLOUD -> com.claudeauto.R.id.modeCloud
-                Settings.MODE_PHONE -> com.claudeauto.R.id.modePhone
-                else -> com.claudeauto.R.id.modeComputer
-            },
-        )
-        showModePanel(app.settings.mode)
-        binding.modeGroup.addOnButtonCheckedListener { _, id, checked ->
-            if (checked) showModePanel(
-                when (id) {
-                    com.claudeauto.R.id.modeCloud -> Settings.MODE_CLOUD
-                    com.claudeauto.R.id.modePhone -> Settings.MODE_PHONE
-                    else -> Settings.MODE_BRIDGE
-                },
-            )
-        }
-        binding.pickSession.setOnClickListener { pickConversation() }
-        binding.speakReplies.setOnCheckedChangeListener { _, checked ->
-            app.settings.speakReplies = checked
-            if (!checked) speaker.stop()
-        }
-        binding.send.setOnClickListener { sendTyped() }
+        binding.inputLayout.setEndIconOnClickListener { sendTyped() }
         binding.input.setOnEditorActionListener { _, action, _ ->
             (action == EditorInfo.IME_ACTION_SEND).also { if (it) sendTyped() }
         }
-        binding.talk.setOnClickListener { talk() }
+        binding.talk.setOnClickListener { if (pulse != null) stopListening() else talk() }
         binding.approve.setOnClickListener { answer(true) }
         binding.deny.setOnClickListener { answer(false) }
+        binding.stop.setOnClickListener { stopTurn() }
 
         requestPermissionsIfNeeded()
 
@@ -116,12 +113,15 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        if (app.settings.isConfigured) lifecycleScope.launch { app.store.refresh() }
+        lifecycleScope.launch { app.store.refresh() }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        intent.getStringExtra(EXTRA_CONVERSATION)?.let { select(it) }
+        intent.getStringExtra(EXTRA_CONVERSATION)?.let {
+            select(it)
+            if (::binding.isInitialized) render(app.store.state.value)
+        }
     }
 
     override fun onStart() {
@@ -131,29 +131,51 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         app.phoneScreenVisible = false
-        listener.cancel()
+        if (::listener.isInitialized) listener.cancel()
+        stopPulse()
         super.onStop()
     }
 
     override fun onDestroy() {
-        speaker.shutdown()
+        if (::speaker.isInitialized) speaker.shutdown()
         super.onDestroy()
     }
 
     private fun render(state: StoreState) {
-        binding.status.text = state.status
         val conversation = current(state)
         if (conversation != null && conversation.key != conversationKey) select(conversation.key)
-        binding.pickSession.text = conversation?.title ?: getString(com.claudeauto.R.string.pick_session)
 
-        binding.transcript.text = conversation?.messages?.joinToString("\n\n") {
-            (if (it.fromClaude) "Claude: " else "You: ") + it.text
-        }.orEmpty()
-        binding.scroll.post { binding.scroll.fullScroll(View.FOCUS_DOWN) }
+        binding.conversationTitle.text = conversation?.title ?: getString(R.string.pick_session)
+        val mode = when (app.settings.mode) {
+            Settings.MODE_CLOUD -> getString(R.string.mode_cloud)
+            Settings.MODE_PHONE -> getString(R.string.mode_phone)
+            else -> getString(R.string.mode_computer)
+        }
+        binding.status.text = "$mode · ${state.status}"
+        binding.statusDot.backgroundTintList = ColorStateList.valueOf(
+            if (state.connected) ContextCompat.getColor(this, R.color.success)
+            else MaterialColors.getColor(binding.statusDot, com.google.android.material.R.attr.colorError),
+        )
+
+        val messages = conversation?.messages.orEmpty()
+        val grew = messages.size > adapter.itemCount
+        adapter.submitList(messages) {
+            if (grew && messages.isNotEmpty()) binding.messages.smoothScrollToPosition(messages.lastIndex)
+        }
+        binding.empty.visibility = if (messages.isEmpty()) View.VISIBLE else View.GONE
 
         val turn = conversation?.turn
-        binding.progress.text = if (turn?.isActive == true) turn.progress + "…" else ""
-        binding.approvalPanel.visibility = if (turn?.state == TurnState.AWAITING_APPROVAL) View.VISIBLE else View.GONE
+        val working = turn?.isActive == true
+        val approving = turn?.state == TurnState.AWAITING_APPROVAL
+        if ((binding.working.visibility == View.VISIBLE) != working || (binding.approvalCard.visibility == View.VISIBLE) != approving) {
+            TransitionManager.beginDelayedTransition(binding.root)
+        }
+        if (pulse == null) {
+            binding.working.visibility = if (working) View.VISIBLE else View.GONE
+            binding.progress.text = turn?.progress?.let { "$it…" }.orEmpty()
+        }
+        binding.approvalCard.visibility = if (approving) View.VISIBLE else View.GONE
+        binding.approvalText.text = turn?.approval?.summary.orEmpty()
     }
 
     /** The selected conversation, falling back to the first one (usually "New chat in <project>"). */
@@ -169,113 +191,39 @@ class MainActivity : AppCompatActivity() {
         app.notifier.cancel(key)
     }
 
-    /**
-     * Pairs this phone with the bridge: read the bridge's certificate, have the user confirm
-     * it matches what the computer printed, pin it, then trade the one-time code for a
-     * device token that only this phone holds.
-     */
-    private fun pair() {
-        val url = binding.bridgeUrl.text.toString().trim()
-        val code = binding.pairingCode.text.toString().trim()
-        if (code.isEmpty()) {
-            binding.status.text = "Enter the pairing code the bridge shows."
-            return
-        }
-        binding.status.text = "Checking the bridge's certificate…"
-        lifecycleScope.launch {
-            val probe = runCatching { BridgeClient.probe(url) }.getOrElse {
-                binding.status.text = "Can't reach the bridge: ${it.message}"
-                return@launch
-            }
-            val pin = if (probe.systemTrusted) null else probe.fingerprint
-            if (pin != null && !confirmCertificate(PinnedTls.short(pin))) {
-                binding.status.text = "Pairing cancelled. The certificate didn't match, so nothing was sent."
-                return@launch
-            }
-            val token = runCatching { BridgeClient.pair(url, pin, code, Build.MODEL ?: "Phone") }.getOrElse {
-                binding.status.text = "Pairing failed: ${it.message}"
-                return@launch
-            }
-            app.settings.mode = shownMode
-            app.settings.bridgeUrl = url
-            app.settings.certFingerprint = pin.orEmpty()
-            app.settings.token = token
-            binding.pairingCode.text?.clear()
-            val loaded = app.store.refresh()
-            binding.status.text = if (loaded.isSuccess) {
-                "Paired" + (pin?.let { ". Certificate ${PinnedTls.short(it)} pinned." } ?: ".")
-            } else {
-                "Paired, but: ${loaded.exceptionOrNull()?.message}"
-            }
-            if (loaded.isSuccess) binding.settingsPanel.visibility = View.GONE
-        }
-    }
-
-    /** Shows the settings for [mode]; the mode is only saved once pairing or "Save" succeeds. */
-    private fun showModePanel(mode: String) {
-        shownMode = mode
-        val cloud = mode == Settings.MODE_CLOUD
-        binding.bridgePanel.visibility = if (cloud) View.GONE else View.VISIBLE
-        binding.cloudPanel.visibility = if (cloud) View.VISIBLE else View.GONE
-        if (!cloud) {
-            val phone = mode == Settings.MODE_PHONE
-            binding.bridgeHelp.setText(if (phone) com.claudeauto.R.string.help_phone else com.claudeauto.R.string.help_computer)
-            binding.bridgeUrl.setText(app.settings.bridgeUrlFor(mode))
-        }
-    }
-
-    /** Cloud mode: everything runs on Anthropic-hosted agents, no computer needed. */
-    private fun saveCloud() {
-        val apiKey = binding.apiKey.text.toString().trim()
-        if (!apiKey.startsWith("sk-ant-")) {
-            binding.status.text = "That doesn't look like an Anthropic API key (it starts with sk-ant-)."
-            return
-        }
-        app.settings.apiKey = apiKey
-        app.settings.githubToken = binding.githubToken.text.toString()
-        app.settings.repos = binding.repos.text.toString().split('\n', ',')
-        app.settings.mode = Settings.MODE_CLOUD
-        binding.status.text = "Connecting to Anthropic… the first time takes a few seconds to set up your cloud agent."
-        lifecycleScope.launch {
-            val loaded = app.store.refresh()
-            binding.status.text = if (loaded.isSuccess) {
-                "Cloud mode ready" + if (app.settings.repos.isEmpty()) " (no repos: Claude works in an empty sandbox)." else "."
-            } else {
-                "Couldn't set up cloud mode: ${loaded.exceptionOrNull()?.message}"
-            }
-            if (loaded.isSuccess) binding.settingsPanel.visibility = View.GONE
-        }
-    }
-
-    private suspend fun confirmCertificate(short: String): Boolean = suspendCancellableCoroutine { cont ->
-        AlertDialog.Builder(this)
-            .setTitle("Check the certificate")
-            .setMessage("The bridge printed \"Certificate: …\" when it started. This bridge's certificate is $short. Do they match?")
-            .setPositiveButton("They match") { _, _ -> if (cont.isActive) cont.resume(true) }
-            .setNegativeButton("No") { _, _ -> if (cont.isActive) cont.resume(false) }
-            .setOnCancelListener { if (cont.isActive) cont.resume(false) }
-            .show()
-    }
-
     private fun pickConversation() {
+        val sheet = BottomSheetDialog(this)
+        val content = SheetConversationsBinding.inflate(layoutInflater)
+        fun fill(conversations: List<Conversation>) {
+            while (content.list.childCount > 1) content.list.removeViewAt(1)
+            for (conversation in conversations) {
+                val row = ItemConversationBinding.inflate(layoutInflater, content.list, false)
+                row.icon.setImageResource(if (conversation.isNew) R.drawable.ic_add else R.drawable.ic_claude)
+                row.title.text = conversation.title
+                row.subtitle.text = conversation.project.orEmpty()
+                row.subtitle.visibility = if (conversation.project.isNullOrEmpty() || conversation.isNew) View.GONE else View.VISIBLE
+                row.root.setOnClickListener {
+                    app.store.forgetMove(conversation.key)
+                    select(conversation.key)
+                    render(app.store.state.value)
+                    sheet.dismiss()
+                }
+                content.list.addView(row.root)
+            }
+        }
+        fill(app.store.state.value.conversations)
+        sheet.setContentView(content.root)
+        sheet.show()
         lifecycleScope.launch {
             app.store.refresh()
-            val conversations = app.store.state.value.conversations
-            if (conversations.isEmpty()) return@launch
-            AlertDialog.Builder(this@MainActivity)
-                .setTitle(com.claudeauto.R.string.pick_session)
-                .setItems(conversations.map { it.title }.toTypedArray()) { _, which ->
-                    app.store.forgetMove(conversations[which].key)
-                    select(conversations[which].key)
-                }
-                .show()
+            if (sheet.isShowing) fill(app.store.state.value.conversations)
         }
     }
 
     private fun sendTyped() {
-        val text = binding.input.text.toString()
+        val text = binding.input.text?.toString().orEmpty()
         if (text.isBlank()) return
-        binding.input.text.clear()
+        binding.input.text?.clear()
         send(text)
     }
 
@@ -291,31 +239,74 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch { app.store.answer(key, approve) }
     }
 
+    private fun stopTurn() {
+        val key = current(app.store.state.value)?.key ?: return
+        speaker.stop()
+        lifecycleScope.launch { app.store.stop(key) }
+    }
+
     private fun talk() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissionsIfNeeded()
             return
         }
         if (!listener.isAvailable) {
-            binding.progress.text = "No speech recognizer on this phone."
+            showHint("No speech recognizer on this phone.")
             return
         }
         speaker.stop()
-        binding.progress.text = "Listening…"
+        startPulse()
+        showHint(getString(R.string.listening))
         listener.listen(object : Listener.Callback {
             override fun onPartial(text: String) {
-                binding.progress.text = "$text…"
+                showHint("$text…")
             }
 
             override fun onResult(text: String) {
-                binding.progress.text = ""
+                stopPulse()
                 send(text)
             }
 
             override fun onError(message: String) {
-                binding.progress.text = message
+                stopPulse()
+                showHint(message)
             }
         })
+    }
+
+    private fun stopListening() {
+        listener.cancel()
+        stopPulse()
+    }
+
+    /** Shows what the mic heard (or why it didn't) in the progress row. */
+    private fun showHint(text: String) {
+        binding.working.visibility = View.VISIBLE
+        binding.progress.text = text
+    }
+
+    private fun startPulse() {
+        stopPulse()
+        binding.talk.setImageResource(R.drawable.ic_stop)
+        pulse = ObjectAnimator.ofPropertyValuesHolder(
+            binding.micHalo,
+            PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.35f),
+            PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.35f),
+            PropertyValuesHolder.ofFloat(View.ALPHA, 0.45f, 0f),
+        ).apply {
+            duration = 900
+            repeatCount = ValueAnimator.INFINITE
+            start()
+        }
+    }
+
+    private fun stopPulse() {
+        pulse?.cancel()
+        pulse = null
+        if (!::binding.isInitialized) return
+        binding.micHalo.alpha = 0f
+        binding.talk.setImageResource(R.drawable.ic_mic)
+        render(app.store.state.value)
     }
 
     private fun requestPermissionsIfNeeded() {
