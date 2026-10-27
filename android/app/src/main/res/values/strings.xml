@@ -108,4 +108,18 @@
     <string name="reply">Reply</string>
     <string name="mark_read">Mark as read</string>
     <string name="back">Back</string>
+
+    <!-- Reporting a response (Google Play's AI-generated content policy) -->
+    <string name="report_response">Report this response</string>
+    <string name="report_title">Report this response</string>
+    <string name="report_offensive">Offensive or hateful</string>
+    <string name="report_sexual">Sexual content</string>
+    <string name="report_dangerous">Dangerous or illegal</string>
+    <string name="report_wrong">Wrong or misleading</string>
+    <string name="report_other">Something else</string>
+    <string name="report_send">Send report</string>
+    <string name="report_body_intro">Reason: %1$s\n\nResponse from Claude:\n%2$s\n\nAnything else you want to add:\n</string>
+    <string name="report_subject">Claude Auto: reported response</string>
+    <string name="report_no_email">No email app found. Report it on GitHub instead, without pasting anything private.</string>
+    <string name="cancel">Cancel</string>
 </resources>

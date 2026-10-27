@@ -1,6 +1,7 @@
 package com.claudeauto.ui
 
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
@@ -12,8 +13,9 @@ import com.claudeauto.R
 /** Chat bubbles: Claude on the left, you on the right. */
 class MessageAdapter : ListAdapter<ChatMessage, MessageAdapter.Holder>(Diff) {
 
-    class Holder(view: android.view.View) : RecyclerView.ViewHolder(view) {
+    class Holder(view: View) : RecyclerView.ViewHolder(view) {
         val text: TextView = view.findViewById(R.id.text)
+        val report: View? = view.findViewById(R.id.report)
     }
 
     override fun getItemViewType(position: Int) = if (getItem(position).fromClaude) CLAUDE else USER
@@ -24,7 +26,9 @@ class MessageAdapter : ListAdapter<ChatMessage, MessageAdapter.Holder>(Diff) {
     }
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
-        holder.text.text = getItem(position).text
+        val message = getItem(position)
+        holder.text.text = message.text
+        holder.report?.setOnClickListener { Reporter.show(it.context, message.text) }
     }
 
     private object Diff : DiffUtil.ItemCallback<ChatMessage>() {
