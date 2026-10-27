@@ -1,0 +1,88 @@
+name: Release
+
+# Push a tag like v0.3.0 to publish: the signed APK, the bridge package the installers download,
+# and the install scripts. The Docker image for the same tag is pushed by CI.
+#
+# For an APK that can update itself across releases, add these repository secrets once
+# (README, "Releases"): CLAUDE_AUTO_KEYSTORE_BASE64, CLAUDE_AUTO_KEYSTORE_PASSWORD,
+# CLAUDE_AUTO_KEY_ALIAS, CLAUDE_AUTO_KEY_PASSWORD.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to create the release for (e.g. v0.3.0)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: bridge/package-lock.json
+      - name: Bridge package
+        working-directory: bridge
+        run: |
+          npm ci
+          npm test
+          npm pack
+          mv claude-auto-bridge-*.tgz "$GITHUB_WORKSPACE/claude-auto-bridge.tgz"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.CLAUDE_AUTO_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "CLAUDE_AUTO_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No signing key secrets: the APK is signed with a temporary debug key."
+          fi
+      - name: APK
+        working-directory: android
+        env:
+          CLAUDE_AUTO_KEYSTORE_PASSWORD: ${{ secrets.CLAUDE_AUTO_KEYSTORE_PASSWORD }}
+          CLAUDE_AUTO_KEY_ALIAS: ${{ secrets.CLAUDE_AUTO_KEY_ALIAS }}
+          CLAUDE_AUTO_KEY_PASSWORD: ${{ secrets.CLAUDE_AUTO_KEY_PASSWORD }}
+        run: |
+          export CLAUDE_AUTO_VERSION="${TAG#v}"
+          export CLAUDE_AUTO_VERSION_CODE="$((100 + GITHUB_RUN_NUMBER))"
+          ./gradlew --no-daemon :core:test assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/claude-auto.apk"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: Claude Auto ${{ env.TAG }}
+          generate_release_notes: true
+          body: |
+            **Phone:** install `claude-auto.apk` (allow installs from your browser or files app).
+
+            **Computer:** Windows (PowerShell) `irm https://raw.githubusercontent.com/${{ github.repository }}/main/install/install.ps1 | iex`
+            · macOS / Linux `curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install/install.sh | bash`
+
+            **Raspberry Pi / Docker:** `curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install/raspberry-pi.sh | bash`
+            (image `ghcr.io/${{ github.repository_owner }}/claude-auto-bridge:${{ env.TAG }}`)
+          files: |
+            claude-auto.apk
+            claude-auto-bridge.tgz
+            install/install.sh
+            install/install.ps1
+            install/raspberry-pi.sh

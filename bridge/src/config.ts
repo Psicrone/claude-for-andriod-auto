@@ -23,6 +23,8 @@ export interface Config {
   projects: Project[];
   permissions: PermissionPolicy;
   model?: string;
+  /** The address phones should use, when it isn't one of this machine's own (a proxy, Docker port mapping). */
+  publicUrl?: string;
 }
 
 export function parseProjects(raw: string | undefined): Project[] {
@@ -38,11 +40,22 @@ export function parseProjects(raw: string | undefined): Project[] {
     });
 }
 
+/** Where `claude-auto-bridge setup` writes settings, so the bridge finds them from any directory. */
+export function settingsFile(dataDir: string): string {
+  return join(dataDir, "bridge.env");
+}
+
+export function defaultDataDir(env: NodeJS.ProcessEnv = process.env): string {
+  return env.BRIDGE_DATA_DIR || join(homedir(), ".claude-auto-bridge");
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const envFile = resolve(process.cwd(), ".env");
-  if (env === process.env && existsSync(envFile)) {
-    // Available on Node 20.12+; values already in the environment win.
-    process.loadEnvFile?.(envFile);
+  if (env === process.env) {
+    // A .env in the current directory, then the one setup wrote. Available on Node 20.12+;
+    // values already in the environment win, so the first file to set a value wins too.
+    for (const file of [() => resolve(process.cwd(), ".env"), () => settingsFile(defaultDataDir(env))]) {
+      if (existsSync(file())) process.loadEnvFile?.(file());
+    }
   }
 
   const host = env.BRIDGE_HOST ?? "127.0.0.1";
@@ -62,13 +75,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   }
 
   return {
-    dataDir: env.BRIDGE_DATA_DIR || join(homedir(), ".claude-auto-bridge"),
+    dataDir: defaultDataDir(env),
     tls,
     host,
     port: Number(env.BRIDGE_PORT ?? 8787),
     projects: parseProjects(env.BRIDGE_PROJECTS),
     permissions,
     model: env.BRIDGE_MODEL || undefined,
+    publicUrl: env.BRIDGE_PUBLIC_URL || undefined,
   };
 }
 

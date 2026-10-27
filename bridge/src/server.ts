@@ -2,14 +2,14 @@
 import { createServer as createHttpServer, type IncomingMessage, type RequestListener, type Server, type ServerResponse } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { realpathSync } from "node:fs";
-import { networkInterfaces } from "node:os";
 import { fileURLToPath } from "node:url";
 import { listSessions, query } from "@anthropic-ai/claude-agent-sdk";
-import { loadConfig, type Config } from "./config.js";
-import { DeviceStore, FailureLimiter, loadOrCreateCertificate, Pairing, shortFingerprint } from "./security.js";
+import type { Config } from "./config.js";
+import { ControlFiles, pairingLink, publicUrl, reachableAddresses, terminalQr } from "./control.js";
+import { DeviceStore, FailureLimiter, loadOrCreateCertificate, Pairing, shortFingerprint, type Device } from "./security.js";
 import { TurnError, TurnManager, type QueryFn } from "./turns.js";
 
-export const VERSION = "0.2.0";
+export const VERSION = "0.3.0";
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_WAIT_MS = 30_000;
 
@@ -29,6 +29,7 @@ export interface BridgeDeps {
   limiter?: FailureLimiter;
   queryFn?: QueryFn;
   listSessionsFn?: ListSessionsFn;
+  onPaired?: (device: Device) => void;
 }
 
 /** The bridge's HTTP API. Every route except /health and /pair needs a paired device's token. */
@@ -59,6 +60,7 @@ export function createHandler(config: Config, deps: BridgeDeps): RequestListener
         limiter.succeed(address);
         const { device, token } = deps.devices.add(String(body.deviceName ?? "Phone"));
         console.log(`Paired "${device.name}" (${device.id}). Pairing is now closed.`);
+        deps.onPaired?.(device);
         return send(res, 200, { token, deviceId: device.id });
       }
 
@@ -182,7 +184,16 @@ function clamp(n: number, min: number, max: number): number {
 export async function startBridge(config: Config, options: { pair?: boolean } = {}): Promise<Server> {
   const devices = new DeviceStore(config.dataDir);
   const pairing = new Pairing();
-  const handler = createHandler(config, { devices, pairing });
+  const control = new ControlFiles(config.dataDir);
+  let currentPairing: PairingInfoBase | undefined;
+  const handler = createHandler(config, {
+    devices,
+    pairing,
+    onPaired: (device) => {
+      if (currentPairing) control.publishPairing({ ...currentPairing, pairedDevice: device.name });
+      currentPairing = undefined;
+    },
+  });
 
   let server: Server;
   let fingerprint: string | undefined;
@@ -194,7 +205,21 @@ export async function startBridge(config: Config, options: { pair?: boolean } = 
     server = createHttpServer(handler);
   }
 
-  await new Promise<void>((resolve) => server.listen(config.port, config.host, resolve));
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", (err: NodeJS.ErrnoException) =>
+      reject(err.code === "EADDRINUSE" ? new Error(`Port ${config.port} is already in use. Is another bridge running?`) : err),
+    );
+    server.listen(config.port, config.host, resolve);
+  });
+  control.markRunning(config.port);
+  const cleanUp = () => control.clearRunning();
+  process.once("exit", cleanUp);
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.once(signal, () => {
+      cleanUp();
+      process.exit(0);
+    });
+  }
 
   const scheme = config.tls === "off" ? "http" : "https";
   console.log(`Claude Auto bridge ${VERSION}`);
@@ -204,52 +229,70 @@ export async function startBridge(config: Config, options: { pair?: boolean } = 
   console.log(`  Projects: ${config.projects.map((p) => `${p.name} (${p.path})`).join(", ")}`);
   console.log(`  Permission policy: ${config.permissions}`);
 
+  /** Opens a pairing window, shows it here and publishes it for `claude-auto-bridge pair` and the Termux launcher. */
+  const openPairing = async () => {
+    const code = pairing.open();
+    const url = publicUrl(config);
+    currentPairing = {
+      link: url ? pairingLink(url, code, fingerprint) : "",
+      url,
+      code,
+      certificate: fingerprint ? shortFingerprint(fingerprint) : undefined,
+      expiresAt: pairing.expiresAtMs,
+    };
+    control.publishPairing(currentPairing);
+    console.log("");
+    console.log(await describePairing(currentPairing));
+  };
+
   const paired = devices.list();
   if (options.pair || paired.length === 0) {
-    const code = pairing.open();
-    console.log("");
-    console.log(`  Pairing code: ${code}   (valid for 10 minutes, one phone)`);
-    console.log("  In the Claude Auto app enter the URL above and this code, then check the");
-    console.log(`  certificate it shows matches ${fingerprint ? shortFingerprint(fingerprint) : "your proxy's certificate"}.`);
+    await openPairing();
   } else {
-    console.log(`  Paired devices: ${paired.map((d) => `${d.name} (${d.id})`).join(", ")}. Use --pair to add another.`);
+    console.log(`  Paired devices: ${paired.map((d) => `${d.name} (${d.id})`).join(", ")}. Run "claude-auto-bridge pair" to add another.`);
   }
+
+  // Another process asking for a pairing window, and expiring the published one.
+  const timer = setInterval(() => {
+    if (control.takePairRequest()) {
+      openPairing().catch((err) => console.error(err));
+    } else if (currentPairing && !pairing.isOpen) {
+      currentPairing = undefined;
+      control.clearPairing();
+    }
+  }, 1000);
+  timer.unref();
+  server.once("close", () => {
+    clearInterval(timer);
+    cleanUp();
+  });
   return server;
 }
 
-function reachableAddresses(host: string): string[] {
-  if (host !== "0.0.0.0" && host !== "::") return [host.includes(":") ? `[${host}]` : host];
-  const found = Object.values(networkInterfaces())
-    .flat()
-    .filter((i) => i && !i.internal && i.family === "IPv4")
-    .map((i) => i!.address);
-  return found.length ? found : ["localhost"];
-}
+type PairingInfoBase = Omit<import("./control.js").PairingInfo, "pairedDevice">;
 
-function runDevicesCommand(config: Config, args: string[]) {
-  const devices = new DeviceStore(config.dataDir);
-  if (args[0] === "revoke") {
-    const id = args[1] ?? "";
-    console.log(devices.revoke(id) ? `Revoked ${id}.` : `No device with id "${id}".`);
-    return;
+/** The QR code and the manual details, as printed by the bridge and by `claude-auto-bridge pair`. */
+export async function describePairing(info: PairingInfoBase): Promise<string> {
+  const lines: string[] = [];
+  if (info.link) {
+    lines.push("  Scan this with the Claude Auto app (or your camera) to pair:", "");
+    lines.push((await terminalQr(info.link)).replace(/^/gm, "  "));
+  } else {
+    lines.push("  Set BRIDGE_PUBLIC_URL to the proxy's https:// address to get a QR code.");
   }
-  const list = devices.list();
-  if (list.length === 0) console.log("No paired devices.");
-  for (const d of list) {
-    console.log(`${d.id}  ${d.name}  paired ${d.pairedAt}${d.lastSeenAt ? `  last seen ${d.lastSeenAt}` : ""}`);
-  }
+  lines.push("  Or enter it by hand:");
+  if (info.url) lines.push(`    Address:      ${info.url}`);
+  lines.push(`    Pairing code: ${info.code}   (valid for 10 minutes, one phone)`);
+  if (info.certificate) lines.push(`    Certificate:  ${info.certificate}   (the app shows this; check it matches)`);
+  return lines.join("\n");
 }
 
 const isMain = process.argv[1] !== undefined && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
-  const config = loadConfig();
-  const [command, ...rest] = process.argv.slice(2);
-  if (command === "devices") {
-    runDevicesCommand(config, rest);
-  } else {
-    startBridge(config, { pair: command === "--pair" || command === "pair" }).catch((err) => {
+  import("./cli.js")
+    .then(({ main }) => main(process.argv.slice(2)))
+    .catch((err) => {
       console.error(err instanceof Error ? err.message : err);
       process.exit(1);
     });
-  }
 }
