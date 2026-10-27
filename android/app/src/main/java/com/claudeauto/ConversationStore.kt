@@ -149,11 +149,12 @@ class ConversationStore(private val settings: Settings, private val scope: Corou
 
         val turn = conversation.turn
         try {
-            if (turn?.state == TurnState.AWAITING_APPROVAL && turn.approval != null) {
+            val approval = turn?.approval
+            if (turn?.state == TurnState.AWAITING_APPROVAL && approval != null) {
                 when (VoiceCommands.answer(said)) {
-                    VoiceCommands.Answer.YES -> client().answerApproval(turn.id, turn.approval.id, true)
-                    VoiceCommands.Answer.NO -> client().answerApproval(turn.id, turn.approval.id, false)
-                    VoiceCommands.Answer.UNCLEAR -> claude(key, "Sorry, was that a yes or a no? I'd like to ${turn.approval.summary}.")
+                    VoiceCommands.Answer.YES -> client().answerApproval(turn.id, approval.id, true)
+                    VoiceCommands.Answer.NO -> client().answerApproval(turn.id, approval.id, false)
+                    VoiceCommands.Answer.UNCLEAR -> claude(key, "Sorry, was that a yes or a no? I'd like to ${approval.summary}.")
                 }
                 return
             }
