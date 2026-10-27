@@ -1,9 +1,12 @@
 package com.claudeauto
 
+import com.claudeauto.backend.Backend
+import com.claudeauto.backend.BackendException
+import com.claudeauto.backend.CloudBackend
+import com.claudeauto.backend.CloudSettings
+import com.claudeauto.backend.Turn
+import com.claudeauto.backend.TurnState
 import com.claudeauto.bridge.BridgeClient
-import com.claudeauto.bridge.BridgeException
-import com.claudeauto.bridge.Turn
-import com.claudeauto.bridge.TurnState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -61,7 +64,7 @@ class ConversationStore(private val settings: Settings, private val scope: Corou
     val claudeSaid: SharedFlow<ClaudeSaid> = _claudeSaid.asSharedFlow()
 
     private val ids = AtomicLong(System.currentTimeMillis())
-    private var client: BridgeClient? = null
+    private var client: Backend? = null
     private var clientKey = ""
 
     /** "new:<project>" keys whose conversation has since become a real session, mapped to the session id. */
@@ -77,12 +80,40 @@ class ConversationStore(private val settings: Settings, private val scope: Corou
         moved.remove(key)
     }
 
-    private fun client(): BridgeClient {
-        check(settings.isConfigured) { "Pair the Claude Auto phone app with your computer first." }
-        val key = listOf(settings.bridgeUrl, settings.token, settings.certFingerprint).joinToString("\u0000")
+    /** The bridge or the cloud backend, rebuilt only when the settings it depends on change. */
+    private fun client(): Backend {
+        check(settings.isConfigured) {
+            if (settings.isCloud) "Add your Anthropic API key in the Claude Auto phone app first."
+            else "Pair the Claude Auto phone app with your computer first."
+        }
+        val key = if (settings.isCloud) {
+            listOf("cloud", settings.apiKey, settings.githubToken, settings.repos.joinToString(",")).joinToString("\u0000")
+        } else {
+            listOf("bridge", settings.bridgeUrl, settings.token, settings.certFingerprint).joinToString("\u0000")
+        }
         if (client == null || key != clientKey) {
-            client = BridgeClient(settings.bridgeUrl, settings.token, settings.certFingerprint.ifBlank { null })
+            client = if (settings.isCloud) {
+                CloudBackend(
+                    CloudSettings(
+                        apiKey = settings.apiKey,
+                        githubToken = settings.githubToken,
+                        repos = settings.repos,
+                        agentId = settings.cloudAgentId,
+                        agentSpecVersion = settings.cloudAgentSpec,
+                        environmentId = settings.cloudEnvironmentId,
+                    ),
+                    onProvisioned = { agentId, spec, environmentId ->
+                        settings.cloudAgentId = agentId
+                        settings.cloudAgentSpec = spec
+                        settings.cloudEnvironmentId = environmentId
+                    },
+                )
+            } else {
+                BridgeClient(settings.bridgeUrl, settings.token, settings.certFingerprint.ifBlank { null })
+            }
             clientKey = key
+            // Conversations belong to one backend; don't mix sessions from the other.
+            _state.update { StoreState() }
         }
         return client!!
     }
@@ -118,11 +149,12 @@ class ConversationStore(private val settings: Settings, private val scope: Corou
 
         val turn = conversation.turn
         try {
-            if (turn?.state == TurnState.AWAITING_APPROVAL && turn.approval != null) {
+            val approval = turn?.approval
+            if (turn?.state == TurnState.AWAITING_APPROVAL && approval != null) {
                 when (VoiceCommands.answer(said)) {
-                    VoiceCommands.Answer.YES -> client().answerApproval(turn.id, turn.approval.id, true)
-                    VoiceCommands.Answer.NO -> client().answerApproval(turn.id, turn.approval.id, false)
-                    VoiceCommands.Answer.UNCLEAR -> claude(key, "Sorry, was that a yes or a no? I'd like to ${turn.approval.summary}.")
+                    VoiceCommands.Answer.YES -> client().answerApproval(turn.id, approval.id, true)
+                    VoiceCommands.Answer.NO -> client().answerApproval(turn.id, approval.id, false)
+                    VoiceCommands.Answer.UNCLEAR -> claude(key, "Sorry, was that a yes or a no? I'd like to ${approval.summary}.")
                 }
                 return
             }
@@ -182,7 +214,7 @@ class ConversationStore(private val settings: Settings, private val scope: Corou
 
             turn = try {
                 client().pollTurn(turn.id, turn.version).also { failures = 0 }
-            } catch (e: BridgeException) {
+            } catch (e: BackendException) {
                 if (e.status == 404) return claude(key, "Your computer restarted the bridge, so I lost track of that request.")
                 if (++failures == 3) claude(key, "I've lost the connection to your computer. I'll keep trying.")
                 delay(backoff(failures))

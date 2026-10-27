@@ -16,10 +16,11 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.claudeauto.ClaudeAutoApp
 import com.claudeauto.Conversation
+import com.claudeauto.Settings
 import com.claudeauto.StoreState
 import com.claudeauto.bridge.BridgeClient
 import com.claudeauto.bridge.PinnedTls
-import com.claudeauto.bridge.TurnState
+import com.claudeauto.backend.TurnState
 import com.claudeauto.databinding.ActivityMainBinding
 import com.claudeauto.voice.Listener
 import com.claudeauto.voice.Speaker
@@ -58,6 +59,15 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.pair.setOnClickListener { pair() }
+        binding.saveCloud.setOnClickListener { saveCloud() }
+        binding.apiKey.setText(app.settings.apiKey)
+        binding.githubToken.setText(app.settings.githubToken)
+        binding.repos.setText(app.settings.repos.joinToString("\n"))
+        binding.modeGroup.check(if (app.settings.isCloud) com.claudeauto.R.id.modeCloud else com.claudeauto.R.id.modeComputer)
+        showModePanel(app.settings.isCloud)
+        binding.modeGroup.addOnButtonCheckedListener { _, id, checked ->
+            if (checked) showModePanel(id == com.claudeauto.R.id.modeCloud)
+        }
         binding.pickSession.setOnClickListener { pickConversation() }
         binding.speakReplies.setOnCheckedChangeListener { _, checked ->
             app.settings.speakReplies = checked
@@ -177,12 +187,41 @@ class MainActivity : AppCompatActivity() {
             app.settings.bridgeUrl = url
             app.settings.certFingerprint = pin.orEmpty()
             app.settings.token = token
+            app.settings.mode = Settings.MODE_BRIDGE
             binding.pairingCode.text?.clear()
             val loaded = app.store.refresh()
             binding.status.text = if (loaded.isSuccess) {
                 "Paired" + (pin?.let { ". Certificate ${PinnedTls.short(it)} pinned." } ?: ".")
             } else {
                 "Paired, but: ${loaded.exceptionOrNull()?.message}"
+            }
+            if (loaded.isSuccess) binding.settingsPanel.visibility = View.GONE
+        }
+    }
+
+    private fun showModePanel(cloud: Boolean) {
+        binding.bridgePanel.visibility = if (cloud) View.GONE else View.VISIBLE
+        binding.cloudPanel.visibility = if (cloud) View.VISIBLE else View.GONE
+    }
+
+    /** Cloud mode: everything runs on Anthropic-hosted agents, no computer needed. */
+    private fun saveCloud() {
+        val apiKey = binding.apiKey.text.toString().trim()
+        if (!apiKey.startsWith("sk-ant-")) {
+            binding.status.text = "That doesn't look like an Anthropic API key (it starts with sk-ant-)."
+            return
+        }
+        app.settings.apiKey = apiKey
+        app.settings.githubToken = binding.githubToken.text.toString()
+        app.settings.repos = binding.repos.text.toString().split('\n', ',')
+        app.settings.mode = Settings.MODE_CLOUD
+        binding.status.text = "Connecting to Anthropic… the first time takes a few seconds to set up your cloud agent."
+        lifecycleScope.launch {
+            val loaded = app.store.refresh()
+            binding.status.text = if (loaded.isSuccess) {
+                "Cloud mode ready" + if (app.settings.repos.isEmpty()) " (no repos: Claude works in an empty sandbox)." else "."
+            } else {
+                "Couldn't set up cloud mode: ${loaded.exceptionOrNull()?.message}"
             }
             if (loaded.isSuccess) binding.settingsPanel.visibility = View.GONE
         }

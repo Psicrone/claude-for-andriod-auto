@@ -22,7 +22,7 @@ import androidx.lifecycle.lifecycleScope
 import com.claudeauto.ClaudeAutoApp
 import com.claudeauto.Conversation
 import com.claudeauto.R
-import com.claudeauto.bridge.TurnState
+import com.claudeauto.backend.TurnState
 import kotlinx.coroutines.launch
 
 /**
@@ -59,7 +59,7 @@ class ConversationsScreen(carContext: CarContext) : Screen(carContext) {
 
     override fun onGetTemplate(): Template {
         if (!app.settings.isConfigured) {
-            return MessageTemplate.Builder("Open Claude Auto on your phone and connect it to your computer first.")
+            return MessageTemplate.Builder("Open Claude Auto on your phone and set it up first.")
                 .setTitle("Claude Code")
                 .setHeaderAction(Action.APP_ICON)
                 .addAction(Action.Builder().setTitle("Try again").setOnClickListener { refresh() }.build())

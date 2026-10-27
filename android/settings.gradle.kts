@@ -14,4 +14,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "ClaudeAuto"
-include(":app")
+include(":app", ":core")
