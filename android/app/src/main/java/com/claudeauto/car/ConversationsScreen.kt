@@ -80,6 +80,13 @@ class ConversationsScreen(carContext: CarContext) : Screen(carContext) {
             .setSingleList(items.build())
             .setActionStrip(
                 ActionStrip.Builder()
+                    .addAction(
+                        Action.Builder()
+                            .setTitle("New")
+                            .setIcon(CarIcon.Builder(IconCompat.createWithResource(carContext, R.drawable.ic_mic)).build())
+                            .setOnClickListener { talkInNewConversation() }
+                            .build(),
+                    )
                     .addAction(Action.Builder().setTitle("Refresh").setOnClickListener { refresh() }.build())
                     .build(),
             )
@@ -87,28 +94,32 @@ class ConversationsScreen(carContext: CarContext) : Screen(carContext) {
     }
 
     private fun conversationItem(conversation: Conversation): ConversationItem {
-        val messages = conversation.messages.takeLast(MAX_MESSAGES).map { message ->
+        // Android Auto only offers a dictated reply after reading at least one unread message
+        // from the other side; with none it says "no new messages" and stops. So Claude's latest
+        // message always counts as unread here: tapping a conversation replays it, then asks for
+        // your reply. A conversation with nothing from Claude yet gets a spoken prompt instead.
+        val recent = conversation.messages.takeLast(MAX_MESSAGES)
+        val lastFromClaude = recent.indexOfLast { it.fromClaude }
+        val messages = recent.mapIndexed { index, message ->
             CarMessage.Builder()
                 .setSender(if (message.fromClaude) claude else self)
                 .setBody(CarText.create(message.text))
                 .setReceivedTimeEpochMillis(message.time)
-                .setRead(message.read)
+                .setRead(message.read && index != lastFromClaude)
                 .build()
-        }.ifEmpty {
-            // A conversation needs at least one message; this is what gets read out for an empty one.
-            val prompt = if (conversation.isNew) {
-                "Reply to start a new Claude Code session in ${conversation.project}."
-            } else {
-                "Reply to continue: ${conversation.title}."
+        }.toMutableList()
+        if (lastFromClaude < 0) {
+            val prompt = when {
+                conversation.turn?.isActive == true -> "Claude is still working on it. Reply to add something, or say stop."
+                conversation.isNew -> "Reply to start a new Claude Code session in ${conversation.project}."
+                else -> "Reply to continue: ${conversation.title}."
             }
-            listOf(
-                CarMessage.Builder()
-                    .setSender(claude)
-                    .setBody(CarText.create(prompt))
-                    .setReceivedTimeEpochMillis(conversation.lastActivity.takeIf { it > 0 } ?: System.currentTimeMillis())
-                    .setRead(true)
-                    .build(),
-            )
+            messages += CarMessage.Builder()
+                .setSender(claude)
+                .setBody(CarText.create(prompt))
+                .setReceivedTimeEpochMillis(maxOf(conversation.lastActivity, recent.lastOrNull()?.time ?: 0L).takeIf { it > 0 } ?: System.currentTimeMillis())
+                .setRead(false)
+                .build()
         }
 
         val title = buildString {
@@ -132,6 +143,7 @@ class ConversationsScreen(carContext: CarContext) : Screen(carContext) {
                 }
 
                 override fun onTextReply(replyText: String) {
+                    app.settings.currentConversation = conversation.key
                     app.store.markRead(conversation.key)
                     app.notifier.cancel(conversation.key)
                     lifecycleScope.launch { app.store.send(conversation.key, replyText) }
@@ -140,6 +152,17 @@ class ConversationsScreen(carContext: CarContext) : Screen(carContext) {
         )
             .setIcon(claudeIcon)
             .build()
+    }
+
+    /** The mic button: dictate a request that starts a new session in the default project. */
+    private fun talkInNewConversation() {
+        val fresh = app.store.state.value.conversations.firstOrNull { it.isNew }
+        if (fresh == null) {
+            CarToast.makeText(carContext, "Can't start a new conversation until Claude Auto connects.", CarToast.LENGTH_LONG).show()
+            refresh()
+            return
+        }
+        screenManager.push(ListeningScreen(carContext, fresh.key, fresh.title))
     }
 
     private fun refresh() {
