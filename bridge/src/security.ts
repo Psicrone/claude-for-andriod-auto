@@ -159,6 +159,11 @@ export class Pairing {
     return this.code;
   }
 
+  /** When the current code stops working (milliseconds since the epoch). */
+  get expiresAtMs(): number {
+    return this.expiresAt;
+  }
+
   get isOpen(): boolean {
     return this.code !== undefined && this.now() < this.expiresAt && this.attempts < PAIRING_MAX_ATTEMPTS;
   }

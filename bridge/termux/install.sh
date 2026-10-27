@@ -27,7 +27,7 @@ if ! proot-distro login "$DISTRO" -- true 2>/dev/null; then
   proot-distro install "$DISTRO"
 fi
 
-echo "==> Installing Node.js, Claude Code and the bridge inside Ubuntu"
+echo "==> Installing Node.js and the bridge (with Claude Code) inside Ubuntu"
 proot-distro login "$DISTRO" -- env REPO="$REPO" bash -euo pipefail -c '
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
@@ -36,7 +36,6 @@ proot-distro login "$DISTRO" -- env REPO="$REPO" bash -euo pipefail -c '
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
     apt-get install -y nodejs
   fi
-  npm install -g @anthropic-ai/claude-code
 
   if [ -d ~/claude-auto/.git ]; then
     git -C ~/claude-auto pull --ff-only
@@ -66,13 +65,27 @@ cat > "$PREFIX/bin/claude-auto-bridge" <<'LAUNCHER'
 #!/data/data/com.termux/files/usr/bin/bash
 # claude-auto-bridge [pair | login | shell | devices ...]
 #   (no args)  start the bridge
-#   pair       start the bridge and show a pairing code for the app
+#   pair       start the bridge and open Claude Auto with the pairing details (nothing to type)
 #   login      sign Claude Code in to your Claude account (one time)
 #   shell      open a shell in the Ubuntu environment (clone repos into ~/projects)
 #   devices    list paired phones; "devices revoke <id>" removes one
 case "${1:-}" in
-  login) exec proot-distro login ubuntu -- claude ;;
   shell) exec proot-distro login ubuntu ;;
+  pair)
+    # The bridge publishes its pairing link in its data folder; open it in Claude Auto.
+    pairing="$PREFIX/var/lib/proot-distro/installed-rootfs/ubuntu/root/.claude-auto-bridge/pairing.json"
+    rm -f "$pairing"
+    (
+      for _ in $(seq 1 120); do
+        if [ -f "$pairing" ]; then
+          link=$(sed -n 's/.*"link": *"\([^"]*\)".*/\1/p' "$pairing")
+          [ -n "$link" ] && termux-open-url "$link"
+          break
+        fi
+        sleep 1
+      done
+    ) &
+    ;;
 esac
 # Keep the CPU awake while the bridge runs, so replies keep coming with the screen off
 # (termux-wake-unlock, or stopping Termux, releases it).
@@ -88,7 +101,7 @@ cat <<'DONE'
 Done. Next:
   1. claude-auto-bridge login   sign Claude Code in (or put ANTHROPIC_API_KEY in the bridge's .env)
   2. claude-auto-bridge shell   then: cd ~/projects && git clone <your repo> && exit
-  3. claude-auto-bridge pair    then in Claude Auto: This phone, enter the code, check the certificate
+  3. claude-auto-bridge pair    Claude Auto opens and pairs by itself
 
 Also, so Android doesn't stop the bridge:
   - Settings > Apps > Termux > Battery: Unrestricted
