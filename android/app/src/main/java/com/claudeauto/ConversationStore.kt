@@ -84,12 +84,12 @@ class ConversationStore(private val settings: Settings, private val scope: Corou
     private fun client(): Backend {
         check(settings.isConfigured) {
             if (settings.isCloud) "Add your Anthropic API key in the Claude Auto phone app first."
-            else "Pair the Claude Auto phone app with your computer first."
+            else "Pair the Claude Auto phone app with your bridge first."
         }
         val key = if (settings.isCloud) {
             listOf("cloud", settings.apiKey, settings.githubToken, settings.repos.joinToString(",")).joinToString("\u0000")
         } else {
-            listOf("bridge", settings.bridgeUrl, settings.token, settings.certFingerprint).joinToString("\u0000")
+            listOf(settings.mode, settings.bridgeUrl, settings.token, settings.certFingerprint).joinToString("\u0000")
         }
         if (client == null || key != clientKey) {
             client = if (settings.isCloud) {
