@@ -202,20 +202,15 @@ CI runs both test suites, runs the installers on Windows, macOS and Linux, build
 
 Push a tag such as `v0.3.0` and the Release workflow publishes `claude-auto.apk`, the `claude-auto-bridge.tgz` package that the installers download, and the install scripts. CI pushes the matching Docker tag.
 
-Android only installs an update over an APK signed with the same key, so give the workflow a permanent key once. On any computer with Java:
+Android only installs an update over an APK signed with the same key, so give the workflow a permanent key once: run `scripts/play/make-upload-key.sh` on a computer with Java and the GitHub CLI. It creates the key and sets the secrets `CLAUDE_AUTO_KEYSTORE_BASE64`, `CLAUDE_AUTO_KEYSTORE_PASSWORD`, `CLAUDE_AUTO_KEY_ALIAS` and `CLAUDE_AUTO_KEY_PASSWORD`. Keep the `.jks` file somewhere safe. Without the secrets the release is signed with a throwaway key. The same key is the Google Play upload key.
 
-```bash
-keytool -genkeypair -v -keystore claude-auto.jks -alias claude-auto -keyalg RSA -keysize 4096 -validity 10000
-base64 -w0 claude-auto.jks   # macOS: base64 -i claude-auto.jks
-```
-
-Add repository secrets (Settings → Secrets and variables → Actions): `CLAUDE_AUTO_KEYSTORE_BASE64` (the base64 output), `CLAUDE_AUTO_KEYSTORE_PASSWORD`, `CLAUDE_AUTO_KEY_ALIAS` (`claude-auto`) and `CLAUDE_AUTO_KEY_PASSWORD`. Keep `claude-auto.jks` somewhere safe. Without the secrets the release is signed with a throwaway key.
+For Google Play (testing tracks for now), see [docs/play-store.md](docs/play-store.md): the **Google Play** workflow builds the app bundle and uploads it when you ask it to.
 
 The first push of the Docker image creates the `claude-auto-bridge` package on GHCR. If `docker pull` asks for a login, make the package public under your GitHub profile → Packages → claude-auto-bridge → Package settings.
 
 ## Notes and limits
 
-- **Play Store.** Google reviews Android Auto apps by category. This app uses the messaging category and the standard messaging templates and notifications, which keeps it within driver-distraction rules, but a public Play listing for an AI assistant isn't guaranteed. Sideloading as above works for personal use.
+- **Play Store.** Google reviews Android Auto apps by category. This app uses the messaging category and the standard messaging templates and notifications, which keeps it within driver-distraction rules, but Google Play only accepts templated messaging apps on its internal and closed testing tracks while that feature is in beta, so a public listing has to wait ([docs/play-store.md](docs/play-store.md)). Sideloading as above works for personal use.
 - **Car API level.** The in-car conversation list needs Android Auto with Car App API level 7 or later (any reasonably current Android Auto). Message notifications with voice reply work on all versions.
 - **Turns survive the app, not the bridge.** If the bridge restarts mid-turn the app tells you it lost track of the request; the Claude Code session itself is still there to resume.
 - **Cost.** Each turn uses your Claude Code account as if you'd typed it at the terminal.

@@ -61,9 +61,9 @@ jobs:
           CLAUDE_AUTO_KEYSTORE_PASSWORD: ${{ secrets.CLAUDE_AUTO_KEYSTORE_PASSWORD }}
           CLAUDE_AUTO_KEY_ALIAS: ${{ secrets.CLAUDE_AUTO_KEY_ALIAS }}
           CLAUDE_AUTO_KEY_PASSWORD: ${{ secrets.CLAUDE_AUTO_KEY_PASSWORD }}
+          CLAUDE_AUTO_SUPPORT_EMAIL: ${{ vars.CLAUDE_AUTO_SUPPORT_EMAIL }}
         run: |
           export CLAUDE_AUTO_VERSION="${TAG#v}"
-          export CLAUDE_AUTO_VERSION_CODE="$((100 + GITHUB_RUN_NUMBER))"
           ./gradlew --no-daemon :core:test assembleRelease
           cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/claude-auto.apk"
 

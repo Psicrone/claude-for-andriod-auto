@@ -1,0 +1,25 @@
+Talk to Claude Code on the way to work. Dictate a task when you set off, hear what Claude did when it's done, and say yes or no before anything risky runs, all without taking your eyes off the road.
+
+HOW IT WORKS
+• Pick a conversation in Android Auto, tap the mic and say what you want done.
+• Claude Code works on your own computer, on this phone, or in the cloud, and its replies are read aloud.
+• When Claude wants to run a command or change files, you're asked first. Say "yes" or "no".
+• Replies also arrive as Android Auto message notifications, so you can answer by voice from any screen.
+
+WHERE CLAUDE RUNS (YOU CHOOSE)
+• My computer or Raspberry Pi: install a small, open-source bridge with one command and scan its QR code. Claude Code uses your repos and your own Claude login. The connection is encrypted and pinned to your computer.
+• This phone: runs Claude Code in Termux on the same phone, no computer needed.
+• Cloud: Anthropic-hosted sandboxes with your GitHub repos, using your own Anthropic API key (billed by Anthropic per use).
+
+PRIVATE BY DESIGN
+There is no Drive Mode account and no server of ours. Your messages go only to the place you pick: your computer, this phone, or Anthropic's API. Speech is turned into text by your phone's own speech recognition service. No ads, no analytics, no tracking.
+
+WHAT YOU NEED
+• Android Auto (phone or car display) for the car experience. The app also works on the phone by itself.
+• A Claude subscription or an Anthropic API key, depending on where Claude runs.
+
+Open source: https://github.com/Psicrone/claude-for-andriod-auto
+
+Drive Mode for Claude Code is an independent app. It is not made, sponsored or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic, PBC.
+
+Please only use voice features when it's safe and legal to do so, and keep your attention on driving.

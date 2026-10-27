@@ -1,0 +1,106 @@
+name: Google Play
+
+# Builds the signed app bundle (.aab) for a release tag and, only when you tick "upload", sends it
+# to a Google Play testing track. Run it from the Actions tab; nothing here runs on its own.
+# Setup and the one-time steps in Play Console: docs/play-store.md.
+#
+# Needs: the upload key secrets (CLAUDE_AUTO_KEYSTORE_BASE64, CLAUDE_AUTO_KEYSTORE_PASSWORD,
+# CLAUDE_AUTO_KEY_ALIAS, CLAUDE_AUTO_KEY_PASSWORD), the repository variable
+# CLAUDE_AUTO_SUPPORT_EMAIL, and for uploads the secret PLAY_SERVICE_ACCOUNT_JSON.
+#
+# Production and open testing aren't offered: Google Play rejects Android Auto templated messaging
+# apps on those tracks while the feature is in beta.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build (e.g. v0.3.1)
+        required: true
+      build:
+        description: Rebuild number for the same tag, 0 to 99 (Play needs a new version code per upload)
+        default: "0"
+      upload:
+        description: Upload to Google Play (leave off to only build the .aab)
+        type: boolean
+        default: false
+      track:
+        description: Play track
+        type: choice
+        options: [internal, alpha]
+        default: internal
+      status:
+        description: Release status on that track
+        type: choice
+        options: [draft, completed]
+        default: draft
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Check settings
+        env:
+          KEYSTORE_BASE64: ${{ secrets.CLAUDE_AUTO_KEYSTORE_BASE64 }}
+          SUPPORT_EMAIL: ${{ vars.CLAUDE_AUTO_SUPPORT_EMAIL }}
+          PLAY_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          missing=0
+          [ -n "$KEYSTORE_BASE64" ] || { echo "::error::Add the upload key secrets first (scripts/play/make-upload-key.sh)."; missing=1; }
+          [ -n "$SUPPORT_EMAIL" ] || { echo "::error::Set the repository variable CLAUDE_AUTO_SUPPORT_EMAIL (where reported responses go)."; missing=1; }
+          if [ "${{ inputs.upload }}" = "true" ] && [ -z "$PLAY_JSON" ]; then
+            echo "::error::Add the PLAY_SERVICE_ACCOUNT_JSON secret to upload (docs/play-store.md)."; missing=1
+          fi
+          exit $missing
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: App bundle
+        working-directory: android
+        env:
+          KEYSTORE_BASE64: ${{ secrets.CLAUDE_AUTO_KEYSTORE_BASE64 }}
+          CLAUDE_AUTO_KEYSTORE_PASSWORD: ${{ secrets.CLAUDE_AUTO_KEYSTORE_PASSWORD }}
+          CLAUDE_AUTO_KEY_ALIAS: ${{ secrets.CLAUDE_AUTO_KEY_ALIAS }}
+          CLAUDE_AUTO_KEY_PASSWORD: ${{ secrets.CLAUDE_AUTO_KEY_PASSWORD }}
+          CLAUDE_AUTO_SUPPORT_EMAIL: ${{ vars.CLAUDE_AUTO_SUPPORT_EMAIL }}
+          TAG: ${{ inputs.tag }}
+          CLAUDE_AUTO_BUILD: ${{ inputs.build }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          export CLAUDE_AUTO_KEYSTORE="$RUNNER_TEMP/upload.jks"
+          export CLAUDE_AUTO_VERSION="${TAG#v}"
+          ./gradlew --no-daemon :core:test bundleRelease
+          rm "$RUNNER_TEMP/upload.jks"
+          # A bundle signed with the debug key would be refused by Play; make sure it isn't.
+          if jarsigner -verify -verbose -certs app/build/outputs/bundle/release/app-release.aab | grep -q "CN=Android Debug"; then
+            echo "::error::The bundle is signed with the debug key."; exit 1
+          fi
+          cp app/build/outputs/bundle/release/app-release.aab "$GITHUB_WORKSPACE/claude-auto-${TAG}.aab"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: claude-auto-${{ inputs.tag }}-aab
+          path: claude-auto-${{ inputs.tag }}.aab
+
+      - name: Upload to Google Play
+        if: inputs.upload
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.claudeauto
+          releaseFiles: claude-auto-${{ inputs.tag }}.aab
+          releaseName: ${{ inputs.tag }}
+          track: ${{ inputs.track }}
+          status: ${{ inputs.status }}
+          whatsNewDirectory: play/whatsnew
