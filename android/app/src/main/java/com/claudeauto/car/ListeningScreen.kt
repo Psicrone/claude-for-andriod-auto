@@ -1,5 +1,7 @@
 package com.claudeauto.car
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.car.app.CarContext
 import androidx.car.app.CarToast
@@ -56,8 +58,8 @@ class ListeningScreen(
             screenManager.pop()
             return
         }
-        if (!dictation.hasPermission) {
-            carContext.requestPermissions(listOf(android.Manifest.permission.RECORD_AUDIO)) { granted, _ ->
+        if (carContext.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            carContext.requestPermissions(listOf(Manifest.permission.RECORD_AUDIO)) { granted, _ ->
                 if (granted.isNotEmpty()) listen() else screenManager.pop()
             }
             return

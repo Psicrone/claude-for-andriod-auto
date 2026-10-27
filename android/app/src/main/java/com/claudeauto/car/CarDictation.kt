@@ -3,7 +3,6 @@ package com.claudeauto.car
 import android.Manifest
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioFormat
@@ -46,9 +45,6 @@ class CarDictation(private val carContext: CarContext) {
         get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             carContext.carAppApiLevel >= 5 &&
             SpeechRecognizer.isRecognitionAvailable(carContext)
-
-    val hasPermission
-        get() = carContext.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
