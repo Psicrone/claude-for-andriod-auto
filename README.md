@@ -1,0 +1,110 @@
+# Claude Auto
+
+Talk to your Claude Code sessions from Android Auto. Dictate a task on the way to work, hear Claude's answer read out, and approve or refuse risky actions by saying "yes" or "no".
+
+```
+ Car display / mic / speakers
+        │  Android Auto (templated messaging + message notifications)
+        ▼
+ Claude Auto app on your phone ──HTTPS / Tailscale──▶ claude-auto bridge on your computer
+                                                         │  Claude Agent SDK
+                                                         ▼
+                                                    Claude Code sessions in your projects
+```
+
+There are two parts:
+
+| Part | What it does |
+| --- | --- |
+| [`bridge/`](bridge) | A small Node server that runs next to Claude Code on your computer. It starts and resumes Claude Code sessions with the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk), turns Claude's replies into speakable text, and holds risky tool calls until you approve them by voice. |
+| [`android/`](android) | The phone app. On the car screen it's a templated messaging app: each Claude Code session is a conversation that Android Auto reads aloud and you reply to by voice. Replies also arrive as car message notifications. On the phone it has a push-to-talk screen with speech recognition and text-to-speech. |
+
+## Why a bridge?
+
+Claude Code sessions live on the machine where Claude Code runs, with your repositories, credentials and settings. Rather than copying any of that to the phone, the phone sends what you said to the bridge, and the bridge drives Claude Code there with the official Agent SDK. Your sessions show up in both places: anything you start from the car can be picked up later with `claude --resume` at your desk, and vice versa.
+
+## How it feels in the car
+
+1. Open **Claude Auto** from the Android Auto launcher. You'll see "New chat in *project*" for each project plus your most recent Claude Code sessions.
+2. Tap a conversation. Android Auto reads the latest messages and offers **Reply**. Say what you want: *"In the work app, find out why the login test is flaky and fix it."*
+3. Claude works. When it wants to run a command or edit a file you'll get a message notification: *"I'd like to run the command npm test. Say yes to allow it, or no to skip it."* Reply "yes" or "no".
+4. When it's done you hear a two to four sentence summary. Code and long output stay on your computer; the spoken version tells you when there's more to read later.
+
+Say "stop" while Claude is working to cancel the current request.
+
+## Setup
+
+### 1. Run the bridge on your computer
+
+Requirements: Node 20 or newer, and Claude Code signed in on that machine (`claude` works in a terminal).
+
+```bash
+cd bridge
+npm install
+npm run build
+cp .env.example .env    # then edit it
+npm start
+```
+
+Edit `.env`:
+
+- `BRIDGE_TOKEN`: a long random secret. Generate one with `node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"`.
+- `BRIDGE_PROJECTS`: the folders you want to talk about, as `name=path` pairs separated by `;`. The first is the default for new chats.
+- `BRIDGE_PERMISSIONS`: `ask` (default: anything beyond reading files is read out for approval), `acceptEdits` (file edits are allowed, commands still need a yes), or `readonly`.
+
+Run the bridge from a normal terminal (not from inside a Claude Code session) so the sessions it creates are independent.
+
+### 2. Make the bridge reachable from your phone
+
+The easiest secure option is [Tailscale](https://tailscale.com): install it on the computer and the phone, then either
+
+- set `BRIDGE_HOST` to the computer's Tailscale IP (`100.x.y.z`) and use `http://100.x.y.z:8787` in the app (traffic is already encrypted by WireGuard), or
+- keep `BRIDGE_HOST=127.0.0.1` and run `tailscale serve --bg 8787`, then use the `https://<machine>.<tailnet>.ts.net` URL.
+
+A Cloudflare Tunnel or any HTTPS reverse proxy works too. Don't expose the bridge to the open internet without HTTPS; the token is the only thing protecting your machine.
+
+### 3. Install the app
+
+Download `claude-auto-debug-apk` from the latest CI run (Actions tab), or build it yourself with `cd android && ./gradlew assembleDebug` and install `app/build/outputs/apk/debug/app-debug.apk`.
+
+Open **Claude Auto** on the phone, enter the bridge URL and token, and tap **Save and test**. Allow microphone and notification access. Long-press the title later to change the connection.
+
+### 4. Allow it in Android Auto
+
+Apps installed outside the Play Store only appear in Android Auto after you enable developer mode:
+
+1. Android Auto settings on the phone → tap **Version** ten times → allow developer settings.
+2. Overflow menu → **Developer settings** → enable **Unknown sources**.
+3. Back in Android Auto settings → **Customize launcher** → make sure Claude Auto is ticked.
+
+You can try everything without a car using the [Desktop Head Unit](https://developer.android.com/training/cars/testing/dhu).
+
+## Bridge API
+
+All endpoints except `/health` need `Authorization: Bearer <BRIDGE_TOKEN>`.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Liveness and version |
+| `GET` | `/projects` | Configured projects |
+| `GET` | `/sessions?limit=10` | Recent Claude Code sessions across those projects |
+| `POST` | `/turns` | `{ text, sessionId?, project? }`: send a message (new session when `sessionId` is omitted) |
+| `GET` | `/turns/:id?since=<version>&wait=<seconds>` | Long-poll a turn: progress, pending approval, final `reply` and `speech` |
+| `POST` | `/turns/:id/approval` | `{ approvalId, approve }`: answer a pending tool approval |
+| `POST` | `/turns/:id/cancel` | Stop the turn |
+
+## Development
+
+```bash
+cd bridge && npm test                          # bridge unit and HTTP tests
+cd android && ./gradlew testDebugUnitTest      # app unit tests
+```
+
+CI builds both and publishes the debug APK as an artifact.
+
+## Notes and limits
+
+- **Play Store.** Google reviews Android Auto apps by category. This app uses the messaging category and the standard messaging templates and notifications, which keeps it within driver-distraction rules, but a public Play listing for an AI assistant isn't guaranteed. Sideloading as above works for personal use.
+- **Car API level.** The in-car conversation list needs Android Auto with Car App API level 7 or later (any reasonably current Android Auto). Message notifications with voice reply work on all versions.
+- **Turns survive the app, not the bridge.** If the bridge restarts mid-turn the app tells you it lost track of the request; the Claude Code session itself is still there to resume.
+- **Cost.** Each turn uses your Claude Code account as if you'd typed it at the terminal.
