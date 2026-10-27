@@ -43,6 +43,14 @@
                 android:text="@string/mode_computer" />
 
             <Button
+                android:id="@+id/modePhone"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/mode_phone" />
+
+            <Button
                 android:id="@+id/modeCloud"
                 style="?attr/materialButtonOutlinedStyle"
                 android:layout_width="0dp"
@@ -56,6 +64,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/bridgeHelp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp" />
 
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent"

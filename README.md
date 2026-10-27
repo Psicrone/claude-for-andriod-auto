@@ -12,9 +12,10 @@ Talk to your Claude Code sessions from Android Auto. Dictate a task on the way t
                                                     Claude Code sessions in your projects
 ```
 
-It works in two modes, and you can switch between them in the app:
+It works in three modes, and you can switch between them in the app:
 
 - **My computer**: Claude Code runs on your PC, with your repos and settings, through a small bridge (below). This mode runs on your Claude Code login.
+- **This phone**: the same bridge and Claude Code run on the phone itself, inside Termux. No computer and no API key needed, but the phone does the work and needs to stay charged. See [Run it on this phone](#run-it-on-this-phone).
 - **Cloud**: no computer needed. The app talks directly to [Anthropic-hosted agents](https://platform.claude.com/docs/en/managed-agents/overview). Each conversation gets its own cloud sandbox with your GitHub repo cloned in, where Claude can edit, test, commit and push. This mode bills an Anthropic API key. See [Cloud mode](#cloud-mode).
 
 The code has three parts:
@@ -108,6 +109,37 @@ How it behaves:
 - Web search and web fetch are off. You can turn them on for the "Claude Auto" agent in the Claude Console if you want them.
 - You can inspect every session (transcript, tool calls, cost) in the Claude Console under **Managed Agents → Sessions**.
 - The API key and GitHub token are stored in the app's private storage on your phone. Use a dedicated key with a spend limit set in the Console.
+
+## Run it on this phone
+
+Claude Code can run on the phone in [Termux](https://termux.dev). Claude Code has no Android build, so the installer puts it, Node.js and the bridge in a small Ubuntu environment ([proot-distro](https://github.com/termux/proot-distro)) where its Linux arm64 build runs. The bridge listens on `127.0.0.1` only, so only apps on the phone can reach it, and it still uses HTTPS and pairing, so other apps on the phone can't use it either.
+
+You need an arm64 phone running Android 10 or newer with about 1.5 GB free.
+
+1. Install Termux from [F-Droid](https://f-droid.org/packages/com.termux/) or its [GitHub releases](https://github.com/termux/termux-app/releases). The Play Store version is out of date.
+2. In Termux, run:
+
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/Psicrone/claude-for-andriod-auto/main/bridge/termux/install.sh | bash
+   ```
+
+   Run it again later to update the bridge.
+3. `claude-auto-bridge login` signs Claude Code in to your Claude account (it prints a link to open in the browser). You can instead put `ANTHROPIC_API_KEY=...` in `~/claude-auto/bridge/.env` inside Ubuntu.
+4. `claude-auto-bridge shell` opens the Ubuntu environment. Clone the repos you want into `~/projects`, then `exit`. To list projects separately, edit `BRIDGE_PROJECTS` in `~/claude-auto/bridge/.env`.
+5. `claude-auto-bridge pair` starts the bridge and shows a pairing code and the certificate's short code. In Claude Auto, long-press the title, choose **This phone** (the address is filled in as `https://127.0.0.1:8787`), enter the code, and check the certificate.
+
+After pairing, start the bridge with `claude-auto-bridge` and leave Termux running in the background. The **This phone** and **My computer** pairings are kept separately, so you can switch between them.
+
+Android stops background apps aggressively, so do these once:
+
+- **Battery**: Settings → Apps → Termux → Battery → **Unrestricted**.
+- **Wake lock**: the launcher runs `termux-wake-lock`, so the phone keeps working with the screen off. Termux shows a notification while it's held; `termux-wake-unlock` releases it.
+- **Child process limit** (Android 12 and newer kills Termux's background processes otherwise):
+  - Android 14 or newer: enable Developer options, then turn on **Disable child process restrictions**.
+  - Android 12 or 13: from a computer with `adb`, run
+    `adb shell "/system/bin/device_config set_sync_disabled_for_tests persistent; /system/bin/device_config put activity_manager max_phantom_processes 2147483647"`.
+
+Claude Code works the phone hard while it's busy. Keep it on a charger in the car.
 
 ## Bridge API
 

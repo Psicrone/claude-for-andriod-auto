@@ -29,7 +29,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
 /**
- * Phone screen: connect to the bridge, pick a Claude Code session and talk to it.
+ * Phone screen: connect to a bridge or the cloud, pick a Claude Code session and talk to it.
  * The same conversations show up in Android Auto.
  */
 class MainActivity : AppCompatActivity() {
@@ -39,6 +39,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var speaker: Speaker
     private lateinit var listener: Listener
     private var conversationKey: String? = null
+    private var shownMode = Settings.MODE_BRIDGE
 
     private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
 
@@ -50,7 +51,6 @@ class MainActivity : AppCompatActivity() {
         listener = Listener(this)
 
         conversationKey = intent.getStringExtra(EXTRA_CONVERSATION) ?: app.settings.currentConversation
-        binding.bridgeUrl.setText(app.settings.bridgeUrl)
         binding.speakReplies.isChecked = app.settings.speakReplies
         binding.settingsPanel.visibility = if (app.settings.isConfigured) View.GONE else View.VISIBLE
         binding.title.setOnLongClickListener {
@@ -63,10 +63,22 @@ class MainActivity : AppCompatActivity() {
         binding.apiKey.setText(app.settings.apiKey)
         binding.githubToken.setText(app.settings.githubToken)
         binding.repos.setText(app.settings.repos.joinToString("\n"))
-        binding.modeGroup.check(if (app.settings.isCloud) com.claudeauto.R.id.modeCloud else com.claudeauto.R.id.modeComputer)
-        showModePanel(app.settings.isCloud)
+        binding.modeGroup.check(
+            when (app.settings.mode) {
+                Settings.MODE_CLOUD -> com.claudeauto.R.id.modeCloud
+                Settings.MODE_PHONE -> com.claudeauto.R.id.modePhone
+                else -> com.claudeauto.R.id.modeComputer
+            },
+        )
+        showModePanel(app.settings.mode)
         binding.modeGroup.addOnButtonCheckedListener { _, id, checked ->
-            if (checked) showModePanel(id == com.claudeauto.R.id.modeCloud)
+            if (checked) showModePanel(
+                when (id) {
+                    com.claudeauto.R.id.modeCloud -> Settings.MODE_CLOUD
+                    com.claudeauto.R.id.modePhone -> Settings.MODE_PHONE
+                    else -> Settings.MODE_BRIDGE
+                },
+            )
         }
         binding.pickSession.setOnClickListener { pickConversation() }
         binding.speakReplies.setOnCheckedChangeListener { _, checked ->
@@ -166,7 +178,7 @@ class MainActivity : AppCompatActivity() {
         val url = binding.bridgeUrl.text.toString().trim()
         val code = binding.pairingCode.text.toString().trim()
         if (code.isEmpty()) {
-            binding.status.text = "Enter the pairing code your computer shows."
+            binding.status.text = "Enter the pairing code the bridge shows."
             return
         }
         binding.status.text = "Checking the bridge's certificate…"
@@ -184,10 +196,10 @@ class MainActivity : AppCompatActivity() {
                 binding.status.text = "Pairing failed: ${it.message}"
                 return@launch
             }
+            app.settings.mode = shownMode
             app.settings.bridgeUrl = url
             app.settings.certFingerprint = pin.orEmpty()
             app.settings.token = token
-            app.settings.mode = Settings.MODE_BRIDGE
             binding.pairingCode.text?.clear()
             val loaded = app.store.refresh()
             binding.status.text = if (loaded.isSuccess) {
@@ -199,9 +211,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showModePanel(cloud: Boolean) {
+    /** Shows the settings for [mode]; the mode is only saved once pairing or "Save" succeeds. */
+    private fun showModePanel(mode: String) {
+        shownMode = mode
+        val cloud = mode == Settings.MODE_CLOUD
         binding.bridgePanel.visibility = if (cloud) View.GONE else View.VISIBLE
         binding.cloudPanel.visibility = if (cloud) View.VISIBLE else View.GONE
+        if (!cloud) {
+            val phone = mode == Settings.MODE_PHONE
+            binding.bridgeHelp.setText(if (phone) com.claudeauto.R.string.help_phone else com.claudeauto.R.string.help_computer)
+            binding.bridgeUrl.setText(app.settings.bridgeUrlFor(mode))
+        }
     }
 
     /** Cloud mode: everything runs on Anthropic-hosted agents, no computer needed. */
@@ -230,7 +250,7 @@ class MainActivity : AppCompatActivity() {
     private suspend fun confirmCertificate(short: String): Boolean = suspendCancellableCoroutine { cont ->
         AlertDialog.Builder(this)
             .setTitle("Check the certificate")
-            .setMessage("Your computer's bridge printed \"Certificate: …\". This bridge's certificate is $short. Do they match?")
+            .setMessage("The bridge printed \"Certificate: …\" when it started. This bridge's certificate is $short. Do they match?")
             .setPositiveButton("They match") { _, _ -> if (cont.isActive) cont.resume(true) }
             .setNegativeButton("No") { _, _ -> if (cont.isActive) cont.resume(false) }
             .setOnCancelListener { if (cont.isActive) cont.resume(false) }
