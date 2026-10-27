@@ -34,9 +34,17 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    packaging {
+        resources {
+            // The Anthropic Java SDK and its Jackson/Kotlin dependencies ship overlapping metadata.
+            excludes += setOf("META-INF/*.kotlin_module", "META-INF/versions/**", "META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*")
+        }
+    }
 }
 
 dependencies {
+    implementation(project(":core"))
     implementation(libs.androidx.car.app)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
