@@ -41,52 +41,87 @@ Say "stop" while Claude is working to cancel the current request.
 
 ## Setup
 
-### 1. Run the bridge on your computer
+### 1. Install the app
 
-Requirements: Node 20 or newer, and Claude Code signed in on that machine (`claude` works in a terminal).
+Download `claude-auto.apk` from the [latest release](https://github.com/Psicrone/claude-for-andriod-auto/releases/latest) on your phone and open it (allow installs from your browser when asked). Builds of every change are also on the Actions tab as `claude-auto-debug-apk`.
+
+Open **Claude Auto** and tap **Get started**. The setup screens ask where Claude should run and walk you through the rest:
+
+- **My computer or Raspberry Pi**: shows the install command for your computer, then you scan the QR code it prints.
+- **This phone**: installs Termux, copies one command that sets everything up, and pairs by itself when it finishes.
+- **Cloud**: asks for an API key and a GitHub token, with links to create both.
+
+Then it asks for the microphone and notifications, and shows how to switch on Android Auto. Change any of this later with the **Connection** button at the top of the main screen.
+
+### 2. Install the bridge on your computer
+
+Claude Code doesn't need to be installed separately (the bridge brings its own copy), and no admin rights are needed. One command installs the bridge, asks which folders Claude may work in and how careful it should be, signs Claude in if it isn't already, starts the bridge now and whenever you log in, and shows the pairing QR code.
+
+**Windows**, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Psicrone/claude-for-andriod-auto/main/install/install.ps1 | iex
+```
+
+**macOS or Linux**, in a terminal:
 
 ```bash
-cd bridge
-npm install
-npm run build
-cp .env.example .env    # then edit it
-npm start
+curl -fsSL https://raw.githubusercontent.com/Psicrone/claude-for-andriod-auto/main/install/install.sh | bash
 ```
 
-Edit `.env`:
+Run it again to update. It uses your Node.js if it's version 20 or newer, and otherwise downloads a private copy for the bridge. Afterwards:
 
-- `BRIDGE_PROJECTS`: the folders you want to talk about, as `name=path` pairs separated by `;`. The first is the default for new chats.
-- `BRIDGE_HOST`: the address the phone will use, such as your Tailscale IP (`100.x.y.z`), or `0.0.0.0` for all interfaces.
-- `BRIDGE_PERMISSIONS`: `ask` (default: anything beyond reading files is read out for approval), `acceptEdits` (file edits are allowed, commands still need a yes), or `readonly`.
+| Command | What it does |
+| --- | --- |
+| `claude-auto-bridge pair` | Show a QR code to pair a phone (also while the bridge runs in the background) |
+| `claude-auto-bridge setup` | Change project folders or the permission policy |
+| `claude-auto-bridge login` | Sign Claude Code in to your Claude account |
+| `claude-auto-bridge devices` | List paired phones; `devices revoke <id>` cuts one off |
+| `claude-auto-bridge service install` / `uninstall` | Start (or stop starting) the bridge when you log in |
 
-Run the bridge from a normal terminal (not from inside a Claude Code session) so the sessions it creates are independent. On first start it prints something like:
+Settings live in `~/.claude-auto-bridge/bridge.env` (see [`bridge/.env.example`](bridge/.env.example) for every option). The permission policies are `ask` (default: anything beyond reading files is read out for your approval), `acceptEdits` (file edits are allowed, commands still need a yes) and `readonly`.
 
+To run it from a clone instead: `cd bridge && npm install && npm run build && npm start`.
+
+### 2b. Or on a Raspberry Pi (or any Docker host)
+
+A Pi 4 or 5 running 64-bit Raspberry Pi OS makes an always-on bridge that doesn't need your computer awake. On the Pi:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Psicrone/claude-for-andriod-auto/main/install/raspberry-pi.sh | bash
 ```
-Claude Auto bridge 0.2.0
-  Listening on https://100.101.102.103:8787
-  Certificate: 952F-A23C  (SHA-256 95:2F:A2:3C:…)
-  Pairing code: LKPS-JP8N   (valid for 10 minutes, one phone)
+
+It installs Docker if needed, runs the bridge image (`ghcr.io/psicrone/claude-auto-bridge`, built for arm64 and amd64) so it starts on every boot, signs Claude in (open the link it shows on any device) and shows the pairing QR code. Clone the repos you want into `~/projects`. Then use `claude-auto pair`, `claude-auto login`, `claude-auto logs`, `claude-auto update` or `claude-auto shell` (set up git credentials there so Claude can push). Settings are in `~/claude-auto/bridge.env`.
+
+Plain Docker works too:
+
+```bash
+docker run -d --name claude-auto --network host --restart unless-stopped \
+  -v claude-auto:/home/node -v ~/projects:/home/node/projects \
+  ghcr.io/psicrone/claude-auto-bridge
+docker exec -it claude-auto claude-auto-bridge login
+docker exec -it claude-auto claude-auto-bridge pair
 ```
 
-### 2. Pair your phone
+### 3. Pair your phone
 
-Install the app (step 3), open it, enter the bridge URL and the pairing code, and tap **Pair with computer**. The app shows the bridge's certificate code; tap **They match** only if it's the same as the `Certificate:` line in your terminal. From then on:
+In the app choose **My computer or Raspberry Pi**, tap **Scan the QR code** and point it at the code in the terminal. You can also scan it with the phone's camera app, which opens Claude Auto. The QR code carries the bridge's address, a one-time code and the bridge certificate's fingerprint, so the app pins the right certificate without you comparing anything. If you'd rather type, tap **Enter the code by hand**; the app then shows the certificate's short code to compare with the `Certificate:` line in the terminal.
+
+The address in the QR code is the one most likely to work from the car: a Tailscale address if the computer has one, then the home network. Set `BRIDGE_PUBLIC_URL` to override it.
+
+How the connection is protected:
 
 - **Everything is encrypted.** The bridge only speaks HTTPS (TLS 1.2+). Its certificate is generated on your computer on first run and never leaves it.
 - **Only your phone gets in.** The app pins that exact certificate, so it won't talk to anything impersonating your computer, even with a valid certificate from a public authority. The bridge accepts only paired phones: each phone gets its own random 256-bit token, and the bridge stores only a hash of it.
 - **Pairing codes are one-time.** A code expires after 10 minutes or 5 wrong tries, and works for one phone. After 10 failed attempts from one address, that address is locked out for 15 minutes.
-- **You can revoke a phone.** `npm run devices` lists paired phones, and `npm run devices -- revoke <id>` cuts one off immediately. `npm run pair` starts the bridge with a fresh code to add another phone.
+- **You can revoke a phone.** `claude-auto-bridge devices revoke <id>` cuts one off immediately.
 - **No plain HTTP.** The app refuses `http://` addresses.
 
-To reach the bridge away from home, use [Tailscale](https://tailscale.com) on the computer and the phone and give the app the Tailscale address. That adds a second, independent encryption layer and keeps the port off the public internet. If you'd rather use `tailscale serve` or a Cloudflare tunnel, set `BRIDGE_HOST=127.0.0.1` and `BRIDGE_TLS=off`, and point the app at the proxy's `https://` URL. The proxy's certificate is publicly trusted, so the app checks it normally instead of pinning it, and pairing and device tokens work the same way.
-
-### 3. Install the app
-
-Download `claude-auto-debug-apk` from the latest CI run (Actions tab), or build it yourself with `cd android && ./gradlew assembleDebug` and install `app/build/outputs/apk/debug/app-debug.apk`. Allow microphone and notification access when asked. Long-press the title later to pair again.
+To reach the bridge away from home, use [Tailscale](https://tailscale.com) on the computer and the phone. That adds a second, independent encryption layer and keeps the port off the public internet. If you'd rather use `tailscale serve` or a Cloudflare tunnel, set `BRIDGE_HOST=127.0.0.1`, `BRIDGE_TLS=off` and `BRIDGE_PUBLIC_URL` to the proxy's `https://` URL. The proxy's certificate is publicly trusted, so the app checks it normally instead of pinning it, and pairing and device tokens work the same way.
 
 ### 4. Allow it in Android Auto
 
-Apps installed outside the Play Store only appear in Android Auto after you enable developer mode:
+Apps installed outside the Play Store only appear in Android Auto after you enable developer mode (the last setup screen has a **Show me** button for this):
 
 1. Android Auto settings on the phone → tap **Version** ten times → allow developer settings.
 2. Overflow menu → **Developer settings** → enable **Unknown sources**.
@@ -98,7 +133,7 @@ You can try everything without a car using the [Desktop Head Unit](https://devel
 
 1. Create an API key at [platform.claude.com](https://platform.claude.com) (Settings, API keys). Cloud mode bills that key per use, separately from any Claude subscription.
 2. Create a [fine-grained GitHub token](https://github.com/settings/personal-access-tokens/new) limited to the repos you want, with **Contents: read and write**. It's handed to Anthropic's git proxy and is never placed inside the sandbox, so code running there can't read it.
-3. In the app, long-press the title, choose **Cloud**, enter the key, the token and your repos (`owner/repo`, one per line), and tap **Save and connect**.
+3. In the app's setup (or **Connection** later), choose **Cloud**, enter the key, the token and your repos (`owner/repo`, one per line), and tap **Connect**.
 
 On first use the app creates one agent ("Claude Auto", Claude Opus 5.5) and one cloud environment in your Anthropic account, then reuses them. You'll see "New chat in *repo*" for each repo plus your recent cloud sessions, both on the phone and in the car.
 
@@ -117,18 +152,16 @@ Claude Code can run on the phone in [Termux](https://termux.dev). Claude Code ha
 You need an arm64 phone running Android 10 or newer with about 1.5 GB free.
 
 1. Install Termux from [F-Droid](https://f-droid.org/packages/com.termux/) or its [GitHub releases](https://github.com/termux/termux-app/releases). The Play Store version is out of date.
-2. In Termux, run:
+2. In Claude Auto's setup choose **This phone** and tap **Copy and open Termux**. In Termux, long-press, **Paste** and press Enter. That runs:
 
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/Psicrone/claude-for-andriod-auto/main/bridge/termux/install.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/Psicrone/claude-for-andriod-auto/main/bridge/termux/install.sh | bash && claude-auto-bridge login && claude-auto-bridge pair
    ```
 
-   Run it again later to update the bridge.
-3. `claude-auto-bridge login` signs Claude Code in to your Claude account (it prints a link to open in the browser). You can instead put `ANTHROPIC_API_KEY=...` in `~/claude-auto/bridge/.env` inside Ubuntu.
-4. `claude-auto-bridge shell` opens the Ubuntu environment. Clone the repos you want into `~/projects`, then `exit`. To list projects separately, edit `BRIDGE_PROJECTS` in `~/claude-auto/bridge/.env`.
-5. `claude-auto-bridge pair` starts the bridge and shows a pairing code and the certificate's short code. In Claude Auto, long-press the title, choose **This phone** (the address is filled in as `https://127.0.0.1:8787`), enter the code, and check the certificate.
+   It installs Node.js and the bridge (with Claude Code) in Ubuntu, then signs Claude Code in to your Claude account (it prints a link to open in the browser; type `/exit` when it says you're logged in). Finally `claude-auto-bridge pair` opens Claude Auto with the pairing details, so there's nothing to type. You can instead put `ANTHROPIC_API_KEY=...` in `~/claude-auto/bridge/.env` inside Ubuntu.
+3. `claude-auto-bridge shell` opens the Ubuntu environment. Clone the repos you want into `~/projects`, then `exit`. To list projects separately, edit `BRIDGE_PROJECTS` in `~/claude-auto/bridge/.env`.
 
-After pairing, start the bridge with `claude-auto-bridge` and leave Termux running in the background. The **This phone** and **My computer** pairings are kept separately, so you can switch between them.
+After pairing, start the bridge with `claude-auto-bridge` and leave Termux running in the background. Run the install command again later to update. The **This phone** and **My computer** pairings are kept separately, so you can switch between them.
 
 Android stops background apps aggressively, so do these once:
 
@@ -163,7 +196,22 @@ cd bridge && npm test                          # bridge unit and HTTP tests
 cd android && ./gradlew :core:test testDebugUnitTest   # core (incl. cloud backend) and app tests
 ```
 
-CI builds both and publishes the debug APK as an artifact.
+CI runs both test suites, runs the installers on Windows, macOS and Linux, builds the Docker image for arm64 and amd64 (pushed to GHCR from `main`), and publishes the debug APK as an artifact.
+
+### Releases
+
+Push a tag such as `v0.3.0` and the Release workflow publishes `claude-auto.apk`, the `claude-auto-bridge.tgz` package that the installers download, and the install scripts. CI pushes the matching Docker tag.
+
+Android only installs an update over an APK signed with the same key, so give the workflow a permanent key once. On any computer with Java:
+
+```bash
+keytool -genkeypair -v -keystore claude-auto.jks -alias claude-auto -keyalg RSA -keysize 4096 -validity 10000
+base64 -w0 claude-auto.jks   # macOS: base64 -i claude-auto.jks
+```
+
+Add repository secrets (Settings → Secrets and variables → Actions): `CLAUDE_AUTO_KEYSTORE_BASE64` (the base64 output), `CLAUDE_AUTO_KEYSTORE_PASSWORD`, `CLAUDE_AUTO_KEY_ALIAS` (`claude-auto`) and `CLAUDE_AUTO_KEY_PASSWORD`. Keep `claude-auto.jks` somewhere safe. Without the secrets the release is signed with a throwaway key.
+
+The first push of the Docker image creates the `claude-auto-bridge` package on GHCR. If `docker pull` asks for a login, make the package public under your GitHub profile → Packages → claude-auto-bridge → Package settings.
 
 ## Notes and limits
 
