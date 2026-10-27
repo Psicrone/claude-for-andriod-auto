@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The bridge normally runs on your own machine. Plain HTTP is allowed so a Tailscale
+  address (100.x.y.z, already encrypted by WireGuard) or a LAN address works out of the box.
+  Use HTTPS (for example Tailscale Serve or a Cloudflare tunnel) for anything else.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
