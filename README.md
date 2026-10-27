@@ -12,11 +12,17 @@ Talk to your Claude Code sessions from Android Auto. Dictate a task on the way t
                                                     Claude Code sessions in your projects
 ```
 
-There are two parts:
+It works in two modes, and you can switch between them in the app:
+
+- **My computer**: Claude Code runs on your PC, with your repos and settings, through a small bridge (below). This mode runs on your Claude Code login.
+- **Cloud**: no computer needed. The app talks directly to [Anthropic-hosted agents](https://platform.claude.com/docs/en/managed-agents/overview). Each conversation gets its own cloud sandbox with your GitHub repo cloned in, where Claude can edit, test, commit and push. This mode bills an Anthropic API key. See [Cloud mode](#cloud-mode).
+
+The code has three parts:
 
 | Part | What it does |
 | --- | --- |
 | [`bridge/`](bridge) | A small Node server that runs next to Claude Code on your computer. It starts and resumes Claude Code sessions with the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk), turns Claude's replies into speakable text, and holds risky tool calls until you approve them by voice. |
+| [`android/core`](android/core) | Plain Kotlin shared by the app: the backend interface, the cloud backend (Anthropic Java SDK), spoken-answer parsing and speech formatting. Tested on the JVM against a fake Managed Agents API. |
 | [`android/`](android) | The phone app. On the car screen it's a templated messaging app: each Claude Code session is a conversation that Android Auto reads aloud and you reply to by voice. Replies also arrive as car message notifications. On the phone it has a push-to-talk screen with speech recognition and text-to-speech. |
 
 ## Why a bridge?
@@ -87,6 +93,22 @@ Apps installed outside the Play Store only appear in Android Auto after you enab
 
 You can try everything without a car using the [Desktop Head Unit](https://developer.android.com/training/cars/testing/dhu).
 
+## Cloud mode
+
+1. Create an API key at [platform.claude.com](https://platform.claude.com) (Settings, API keys). Cloud mode bills that key per use, separately from any Claude subscription.
+2. Create a [fine-grained GitHub token](https://github.com/settings/personal-access-tokens/new) limited to the repos you want, with **Contents: read and write**. It's handed to Anthropic's git proxy and is never placed inside the sandbox, so code running there can't read it.
+3. In the app, long-press the title, choose **Cloud**, enter the key, the token and your repos (`owner/repo`, one per line), and tap **Save and connect**.
+
+On first use the app creates one agent ("Claude Auto", Claude Opus 5.5) and one cloud environment in your Anthropic account, then reuses them. You'll see "New chat in *repo*" for each repo plus your recent cloud sessions, both on the phone and in the car.
+
+How it behaves:
+
+- Claude works in `/workspace/<repo>`. When it changes code it commits to a new `claude/...` branch, pushes it, and tells you the branch name. It never pushes to `main`. Open the pull request yourself when you're back at a screen.
+- Tool permissions use the server's **auto** policy. Safe actions just run, high-risk ones are refused, and anything the server can't decide pauses and is read out to you for a spoken yes or no.
+- Web search and web fetch are off. You can turn them on for the "Claude Auto" agent in the Claude Console if you want them.
+- You can inspect every session (transcript, tool calls, cost) in the Claude Console under **Managed Agents → Sessions**.
+- The API key and GitHub token are stored in the app's private storage on your phone. Use a dedicated key with a spend limit set in the Console.
+
 ## Bridge API
 
 HTTPS only. All endpoints except `/health` and `/pair` need `Authorization: Bearer <device token>`.
@@ -106,7 +128,7 @@ HTTPS only. All endpoints except `/health` and `/pair` need `Authorization: Bear
 
 ```bash
 cd bridge && npm test                          # bridge unit and HTTP tests
-cd android && ./gradlew testDebugUnitTest      # app unit tests
+cd android && ./gradlew :core:test testDebugUnitTest   # core (incl. cloud backend) and app tests
 ```
 
 CI builds both and publishes the debug APK as an artifact.
