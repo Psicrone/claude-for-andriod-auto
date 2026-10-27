@@ -6,7 +6,7 @@ Talk to your Claude Code sessions from Android Auto. Dictate a task on the way t
  Car display / mic / speakers
         │  Android Auto (templated messaging + message notifications)
         ▼
- Claude Auto app on your phone ──HTTPS / Tailscale──▶ claude-auto bridge on your computer
+ Claude Auto app on your phone ──HTTPS, pinned cert──▶ claude-auto bridge on your computer
                                                          │  Claude Agent SDK
                                                          ▼
                                                     Claude Code sessions in your projects
@@ -48,26 +48,34 @@ npm start
 
 Edit `.env`:
 
-- `BRIDGE_TOKEN`: a long random secret. Generate one with `node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"`.
 - `BRIDGE_PROJECTS`: the folders you want to talk about, as `name=path` pairs separated by `;`. The first is the default for new chats.
+- `BRIDGE_HOST`: the address the phone will use, such as your Tailscale IP (`100.x.y.z`), or `0.0.0.0` for all interfaces.
 - `BRIDGE_PERMISSIONS`: `ask` (default: anything beyond reading files is read out for approval), `acceptEdits` (file edits are allowed, commands still need a yes), or `readonly`.
 
-Run the bridge from a normal terminal (not from inside a Claude Code session) so the sessions it creates are independent.
+Run the bridge from a normal terminal (not from inside a Claude Code session) so the sessions it creates are independent. On first start it prints something like:
 
-### 2. Make the bridge reachable from your phone
+```
+Claude Auto bridge 0.2.0
+  Listening on https://100.101.102.103:8787
+  Certificate: 952F-A23C  (SHA-256 95:2F:A2:3C:…)
+  Pairing code: LKPS-JP8N   (valid for 10 minutes, one phone)
+```
 
-The easiest secure option is [Tailscale](https://tailscale.com): install it on the computer and the phone, then either
+### 2. Pair your phone
 
-- set `BRIDGE_HOST` to the computer's Tailscale IP (`100.x.y.z`) and use `http://100.x.y.z:8787` in the app (traffic is already encrypted by WireGuard), or
-- keep `BRIDGE_HOST=127.0.0.1` and run `tailscale serve --bg 8787`, then use the `https://<machine>.<tailnet>.ts.net` URL.
+Install the app (step 3), open it, enter the bridge URL and the pairing code, and tap **Pair with computer**. The app shows the bridge's certificate code; tap **They match** only if it's the same as the `Certificate:` line in your terminal. From then on:
 
-A Cloudflare Tunnel or any HTTPS reverse proxy works too. Don't expose the bridge to the open internet without HTTPS; the token is the only thing protecting your machine.
+- **Everything is encrypted.** The bridge only speaks HTTPS (TLS 1.2+). Its certificate is generated on your computer on first run and never leaves it.
+- **Only your phone gets in.** The app pins that exact certificate, so it won't talk to anything impersonating your computer, even with a valid certificate from a public authority. The bridge accepts only paired phones: each phone gets its own random 256-bit token, and the bridge stores only a hash of it.
+- **Pairing codes are one-time.** A code expires after 10 minutes or 5 wrong tries, and works for one phone. After 10 failed attempts from one address, that address is locked out for 15 minutes.
+- **You can revoke a phone.** `npm run devices` lists paired phones, and `npm run devices -- revoke <id>` cuts one off immediately. `npm run pair` starts the bridge with a fresh code to add another phone.
+- **No plain HTTP.** The app refuses `http://` addresses.
+
+To reach the bridge away from home, use [Tailscale](https://tailscale.com) on the computer and the phone and give the app the Tailscale address. That adds a second, independent encryption layer and keeps the port off the public internet. If you'd rather use `tailscale serve` or a Cloudflare tunnel, set `BRIDGE_HOST=127.0.0.1` and `BRIDGE_TLS=off`, and point the app at the proxy's `https://` URL. The proxy's certificate is publicly trusted, so the app checks it normally instead of pinning it, and pairing and device tokens work the same way.
 
 ### 3. Install the app
 
-Download `claude-auto-debug-apk` from the latest CI run (Actions tab), or build it yourself with `cd android && ./gradlew assembleDebug` and install `app/build/outputs/apk/debug/app-debug.apk`.
-
-Open **Claude Auto** on the phone, enter the bridge URL and token, and tap **Save and test**. Allow microphone and notification access. Long-press the title later to change the connection.
+Download `claude-auto-debug-apk` from the latest CI run (Actions tab), or build it yourself with `cd android && ./gradlew assembleDebug` and install `app/build/outputs/apk/debug/app-debug.apk`. Allow microphone and notification access when asked. Long-press the title later to pair again.
 
 ### 4. Allow it in Android Auto
 
@@ -81,11 +89,12 @@ You can try everything without a car using the [Desktop Head Unit](https://devel
 
 ## Bridge API
 
-All endpoints except `/health` need `Authorization: Bearer <BRIDGE_TOKEN>`.
+HTTPS only. All endpoints except `/health` and `/pair` need `Authorization: Bearer <device token>`.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/health` | Liveness and version |
+| `POST` | `/pair` | `{ code, deviceName }`: trade the one-time pairing code for this device's token |
 | `GET` | `/projects` | Configured projects |
 | `GET` | `/sessions?limit=10` | Recent Claude Code sessions across those projects |
 | `POST` | `/turns` | `{ text, sessionId?, project? }`: send a message (new session when `sessionId` is omitted) |

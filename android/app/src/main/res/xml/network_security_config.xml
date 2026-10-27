@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  No plain HTTP anywhere. The bridge serves HTTPS with its own certificate, which the app
+  pins (see PinnedTls); a bridge behind Tailscale Serve or a tunnel uses a normal certificate.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Claude Auto</string>
+    <string name="bridge_url">Bridge URL</string>
+    <string name="bridge_url_hint">https://100.64.0.10:8787</string>
+    <string name="pairing_code">Pairing code from your computer</string>
+    <string name="pair">Pair with computer</string>
+    <string name="pick_session">Choose session</string>
+    <string name="speak_replies">Read replies aloud</string>
+    <string name="talk">Talk</string>
+    <string name="send">Send</string>
+    <string name="message_hint">Or type a message</string>
+    <string name="approve">Approve</string>
+    <string name="deny">Deny</string>
+    <string name="stop">Stop</string>
+    <string name="no_session">New conversation</string>
+    <string name="channel_replies">Claude replies</string>
+    <string name="claude">Claude</string>
+    <string name="you">You</string>
+    <string name="reply">Reply</string>
+    <string name="mark_read">Mark as read</string>
+</resources>
